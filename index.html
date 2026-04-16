@@ -1,0 +1,952 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ROS 節點關係圖產生器</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 設定 Tailwind 自訂色系 -->
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        oak: '#D9C5B2',    // 淺橡木色
+                        ecru: '#F3EFE0',   // 生膠色
+                        cement: '#e0d3c5', // 自訂沙色背景 (原水泥灰替換)
+                    }
+                }
+            }
+        }
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11.4.0/dist/mermaid.min.js"></script>
+    <!-- 引入 SheetJS 用於解析 Excel 檔案 -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <style>
+        .mermaid-container {
+            display: flex;
+            justify-content: center;
+            background: white;
+            padding: 20px;
+            border-radius: 12px;
+            min-height: 400px;
+            overflow: auto;
+        }
+        .node-card:hover {
+            transform: translateY(-2px);
+            transition: all 0.2s;
+        }
+        /* 自訂滾動條，配合沙色與生膠色 */
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: #e0d3c5; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb { background: #D9C5B2; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #c2b09e; }
+        
+        /* Mermaid 節點與線段標籤滑鼠互動樣式 */
+        .node { cursor: pointer !important; }
+        .edgeLabel { 
+            cursor: pointer !important; 
+            pointer-events: all !important; 
+        }
+        .edgeLabel rect { transition: all 0.2s; }
+        .edgeLabel:hover rect {
+            fill: #F3EFE0 !important;
+            stroke: #D9C5B2 !important;
+            stroke-width: 1.5px !important;
+        }
+        .edgeLabel:hover span, .edgeLabel:hover div {
+            color: #334155 !important;
+            font-weight: 700 !important;
+        }
+    </style>
+</head>
+<body class="bg-cement text-slate-800 min-h-screen flex flex-col">
+
+    <!-- 頂部導航列 -->
+    <nav class="bg-white border-b-4 border-oak p-4 shadow-sm sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto flex justify-between items-center">
+            <div class="flex items-center gap-3">
+                <div class="bg-oak p-2 rounded-lg text-slate-900 shadow-sm">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                    </svg>
+                </div>
+                <div>
+                    <h1 class="text-xl font-bold text-slate-800">ROS 系統拓撲可視化</h1>
+                    <p class="text-xs text-slate-500" id="status-text">自動解析節點發布與訂閱關係</p>
+                </div>
+            </div>
+            <div class="flex gap-4 text-sm items-center flex-wrap">
+                <button onclick="openImportModal()" class="bg-oak hover:opacity-80 text-slate-900 px-4 py-2 rounded-full font-bold transition-all shadow-sm flex items-center gap-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                    </svg>
+                    匯入更新圖表
+                </button>
+                
+                <button onclick="exportStandaloneHTML()" class="bg-slate-700 hover:bg-slate-800 text-white px-4 py-2 rounded-full font-bold transition-all shadow-sm flex items-center gap-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                    </svg>
+                    匯出 HTML
+                </button>
+
+                <div class="w-px h-6 bg-slate-300 mx-2 hidden md:block opacity-50"></div>
+                <button onclick="switchView('graph')" id="btn-graph" class="bg-slate-800 text-white px-4 py-2 rounded-full font-bold transition-all shadow-md">拓撲圖視圖</button>
+                <button onclick="switchView('table')" id="btn-table" class="bg-white text-slate-600 border border-slate-300 px-4 py-2 rounded-full font-bold transition-all hover:bg-slate-50">原始資料表</button>
+            </div>
+        </div>
+    </nav>
+
+    <main class="max-w-7xl mx-auto p-6 flex-1 w-full">
+        
+        <!-- 拓撲圖區域 -->
+        <div id="graph-view" class="space-y-6">
+            
+            <!-- 節點過濾控制區 -->
+            <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-100">
+                <div class="flex justify-between items-center mb-3">
+                    <h3 class="text-sm font-bold text-slate-700 flex items-center gap-2">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-oak" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
+                        </svg>
+                        節點顯示過濾 <span class="text-xs font-normal text-slate-400">(只選擇單一節點時，將自動顯示其所有關聯節點)</span>
+                    </h3>
+                    <div class="flex gap-3">
+                        <button onclick="toggleAllFilters(true)" class="text-xs font-bold text-oak hover:text-slate-900 transition-colors">全選 (全開)</button>
+                        <span class="text-cement">|</span>
+                        <button onclick="toggleAllFilters(false)" class="text-xs font-bold text-slate-400 hover:text-slate-900 transition-colors">全不選</button>
+                    </div>
+                </div>
+                <div id="node-filters" class="flex flex-wrap gap-2">
+                    <span class="text-xs text-cement italic">請先匯入資料...</span>
+                </div>
+            </div>
+
+            <!-- 圖表主體區塊 -->
+            <div class="bg-white p-6 rounded-2xl shadow-md border border-slate-100">
+                <h2 class="text-lg font-bold mb-4 flex items-center gap-2 text-slate-800">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-oak" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
+                    </svg>
+                    系統節點關係圖
+                    <span class="text-xs font-normal text-slate-400 ml-2">(提示：點擊圖表中的<strong class="text-oak">節點</strong>或<strong class="text-oak">線段標籤</strong>可查看詳細說明)</span>
+                </h2>
+                <div class="border border-ecru rounded-xl bg-white p-4 mermaid-container shadow-inner" id="mermaid-render-area">
+                    <div class="text-slate-400 mt-10">請點擊上方「匯入更新圖表」載入資料...</div>
+                </div>
+            </div>
+
+            <!-- 動態節點詳細資訊卡片 -->
+            <div id="node-cards-container" class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <!-- 卡片將會動態生成於此 -->
+            </div>
+        </div>
+
+        <!-- 表格視圖區域 -->
+        <div id="table-view" class="hidden animate-in fade-in duration-500">
+            <div class="bg-white rounded-2xl shadow-md border border-slate-100 overflow-hidden">
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left text-sm whitespace-nowrap">
+                        <thead class="bg-ecru border-b border-oak/30 text-slate-600 uppercase text-xs">
+                            <tr>
+                                <th class="px-6 py-4 font-bold">節點 (Node)</th>
+                                <th class="px-6 py-4 font-bold">類型 / 方向</th>
+                                <th class="px-6 py-4 font-bold">名稱 (Topic/Action)</th>
+                                <th class="px-6 py-4 font-bold">型別 (Type)</th>
+                                <th class="px-6 py-4 font-bold max-w-xs">說明</th>
+                            </tr>
+                        </thead>
+                        <tbody id="data-table-body" class="divide-y divide-slate-100">
+                            <tr>
+                                <td colspan="5" class="px-6 py-8 text-center text-slate-400">尚無資料，請點擊上方「匯入更新圖表」</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+    </main>
+
+    <!-- 加入個人資訊的頁尾 -->
+    <footer class="mt-auto py-6 pb-8 text-center">
+        <p class="text-sm font-bold text-slate-700/80"> 
+            <a href="mailto:mingkaikan@gmail.com " class="hover:text-slate-900 underline decoration-slate-400 underline-offset-4 transition-colors">
+                mingkaikan@gmail.com
+            </a>
+        </p>
+    </footer>
+
+    <!-- 匯入資料 Modal -->
+    <div id="import-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm hidden z-[100] flex items-center justify-center opacity-0 transition-opacity duration-300">
+        <div class="bg-white w-full max-w-5xl rounded-2xl shadow-2xl p-6 transform scale-95 transition-transform duration-300 border-t-8 border-oak" id="import-modal-content">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-xl font-bold text-slate-800 flex items-center gap-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-oak" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
+                    </svg>
+                    匯入節點通訊資料
+                </h2>
+                <button onclick="closeImportModal()" class="text-slate-400 hover:text-slate-700 bg-ecru p-1.5 rounded-full transition-colors">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                </button>
+            </div>
+            
+            <div class="flex flex-col md:flex-row md:items-center justify-between mb-3 gap-3">
+                <p class="text-sm text-slate-500 font-medium">請貼上表格文字（支援從 Excel 複製），或直接上傳檔案：</p>
+                <label class="cursor-pointer px-4 py-2 bg-ecru text-slate-700 hover:bg-oak hover:text-slate-900 border border-oak rounded-lg text-sm font-bold flex items-center gap-2 transition-colors shrink-0 shadow-sm relative overflow-hidden">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                    </svg>
+                    <span id="upload-btn-text">上傳 CSV / Excel 檔案 (讀取第一分頁)</span>
+                    <input type="file" id="file-upload" accept=".csv, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, application/vnd.ms-excel" class="hidden" onchange="handleFileUpload(event)">
+                </label>
+            </div>
+            
+            <textarea id="import-textarea" class="w-full h-80 border border-slate-300 rounded-xl p-4 text-xs font-mono bg-ecru/30 focus:ring-2 focus:ring-oak focus:border-oak outline-none resize-none text-slate-700" placeholder="可直接貼上，或使用上方按鈕上傳..."></textarea>
+            
+            <div class="flex justify-end gap-3 mt-6">
+                <button onclick="closeImportModal()" class="px-5 py-2 rounded-lg text-slate-500 hover:bg-ecru hover:text-slate-700 font-bold transition-colors">取消</button>
+                <button onclick="processImport()" class="px-5 py-2 rounded-lg bg-oak hover:opacity-80 text-slate-900 font-bold transition-colors shadow-md flex items-center gap-2">
+                    產生關係圖
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 節點詳細資訊 Modal -->
+    <div id="node-detail-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm hidden z-[100] flex items-center justify-center opacity-0 transition-opacity duration-300">
+        <div class="bg-white w-full max-w-4xl max-h-[85vh] flex flex-col rounded-2xl shadow-2xl transform scale-95 transition-transform duration-300 border-t-8 border-cement" id="node-detail-modal-content">
+            <div class="p-6 border-b border-oak/20 flex justify-between items-center bg-cement rounded-t-lg">
+                <div>
+                    <h2 class="text-2xl font-bold text-slate-800 flex items-center gap-3">
+                        <div class="bg-white border border-oak text-slate-800 p-2 rounded-lg shadow-sm">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
+                            </svg>
+                        </div>
+                        <span id="detail-node-name">Node Name</span>
+                    </h2>
+                </div>
+                <button onclick="closeNodeDetailModal()" class="text-slate-400 hover:text-slate-700 bg-white p-2 rounded-full shadow-sm hover:shadow transition-all">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                </button>
+            </div>
+            <div class="p-6 overflow-y-auto flex-1 bg-cement rounded-b-2xl">
+                <div id="detail-node-content" class="space-y-6"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 標籤(Topic)詳細資訊 Modal -->
+    <div id="topic-detail-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm hidden z-[100] flex items-center justify-center opacity-0 transition-opacity duration-300">
+        <div class="bg-white w-full max-w-4xl max-h-[85vh] flex flex-col rounded-2xl shadow-2xl transform scale-95 transition-transform duration-300 border-t-8 border-oak" id="topic-detail-modal-content">
+            <div class="p-6 border-b border-oak/20 flex justify-between items-center bg-cement rounded-t-lg">
+                <div>
+                    <h2 class="text-2xl font-bold text-slate-800 flex items-center gap-3">
+                        <div class="bg-white border border-oak text-slate-800 p-2 rounded-lg shadow-sm">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                            </svg>
+                        </div>
+                        <span id="detail-topic-name">/topic_name</span>
+                    </h2>
+                    <p class="text-sm text-slate-500 mt-1 ml-14 font-medium">此通訊介面的來源與接收節點關係</p>
+                </div>
+                <button onclick="closeTopicDetailModal()" class="text-slate-400 hover:text-slate-700 bg-white p-2 rounded-full shadow-sm hover:shadow transition-all">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                </button>
+            </div>
+            <div class="p-6 overflow-y-auto flex-1 bg-cement rounded-b-2xl">
+                <div id="detail-topic-content" class="space-y-4"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 初始化設定
+        mermaid.initialize({ 
+            startOnLoad: false,
+            theme: 'neutral',
+            securityLevel: 'loose',
+            flowchart: { useMaxWidth: true, htmlLabels: true, curve: 'step' }
+        });
+
+        let parsedData = [];
+        window.nodeIdMap = {}; 
+        
+        // 過濾器狀態管理
+        window.allCoreNodes = new Set();
+        window.activeCoreNodes = new Set();
+
+        // CSV 解析工具
+        function parseCSVLine(text) {
+            let ret = [];
+            let cur = '';
+            let inQuote = false;
+            for (let i = 0; i < text.length; i++) {
+                let char = text[i];
+                if (inQuote) {
+                    if (char === '"') {
+                        if (i + 1 < text.length && text[i + 1] === '"') {
+                            cur += '"'; i++; 
+                        } else { inQuote = false; }
+                    } else { cur += char; }
+                } else {
+                    if (char === '"') { inQuote = true; }
+                    else if (char === ',') { ret.push(cur); cur = ''; }
+                    else { cur += char; }
+                }
+            }
+            ret.push(cur);
+            return ret;
+        }
+
+        function handleFileUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            
+            const fileName = file.name.toLowerCase();
+            const btnText = document.getElementById('upload-btn-text');
+            const originalText = btnText.innerText;
+            btnText.innerText = '讀取中...';
+            
+            const reader = new FileReader();
+
+            if (fileName.endsWith('.xlsx') || fileName.endsWith('.xls')) {
+                reader.onload = function(e) {
+                    try {
+                        const data = new Uint8Array(e.target.result);
+                        const workbook = XLSX.read(data, {type: 'array'});
+                        const firstSheetName = workbook.SheetNames[0];
+                        const worksheet = workbook.Sheets[firstSheetName];
+                        const csvString = XLSX.utils.sheet_to_csv(worksheet);
+                        
+                        document.getElementById('import-textarea').value = csvString;
+                        btnText.innerText = originalText;
+                        processImport(); 
+                    } catch (err) {
+                        alert("讀取 Excel 失敗，請確認檔案格式是否正確。\n錯誤訊息: " + err.message);
+                        btnText.innerText = originalText;
+                    }
+                };
+                reader.readAsArrayBuffer(file);
+            } 
+            else if (fileName.endsWith('.csv')) {
+                reader.onload = function(e) {
+                    document.getElementById('import-textarea').value = e.target.result;
+                    btnText.innerText = originalText;
+                    processImport(); 
+                };
+                reader.readAsText(file, 'UTF-8');
+            } else {
+                alert("不支援的檔案格式，請上傳 CSV 或 Excel 檔案 (.xlsx, .xls)。");
+                btnText.innerText = originalText;
+            }
+            
+            event.target.value = ''; 
+        }
+
+        function processImport() {
+            const rawText = document.getElementById('import-textarea').value;
+            if (!rawText.trim()) { alert("請先貼上資料或上傳 CSV/Excel 檔案！"); return; }
+
+            const lines = rawText.trim().split('\n');
+            parsedData = [];
+            window.allCoreNodes = new Set();
+
+            const isCSV = lines[0].includes(',') && !lines[0].includes('\t');
+
+            lines.forEach(line => {
+                line = line.trim();
+                if (!line || line.startsWith('節點') || line.startsWith('◆') || line.startsWith('Topic 名稱')) return;
+                
+                let parts;
+                if (isCSV) {
+                    parts = parseCSVLine(line);
+                } else if (line.includes('\t')) {
+                    parts = line.split('\t').map(p => p.trim());
+                } else {
+                    parts = line.split(/ {2,}/).map(p => p.trim());
+                }
+                
+                if (parts.length >= 4) {
+                    let nodeName = parts[0]?.trim() || '';
+                    if (nodeName) window.allCoreNodes.add(nodeName);
+                    
+                    parsedData.push({
+                        node: nodeName,
+                        type: parts[1]?.trim() || '',
+                        direction: parts[2]?.trim() || '',
+                        topic: parts[3]?.trim() || '',
+                        msgType: parts[4]?.trim() || '',
+                        source: parts[5] && parts[5].trim() !== '外部 / 未知' && parts[5].trim() !== '—（外部）' && parts[5].trim() !== '' ? parts[5].trim() : 'External',
+                        callback: parts[6] && parts[6].trim() !== '' ? parts[6].trim() : '-',
+                        dataFormat: parts[7] && parts[7].trim() !== '' ? parts[7].trim() : '-',
+                        desc: parts[8]?.trim() || (parts.length > 5 ? parts[parts.length-1].trim() : '')
+                    });
+                }
+            });
+
+            if (parsedData.length === 0) {
+                alert("無法解析資料，請確認格式是否正確。"); return;
+            }
+
+            // 預設將所有節點設為顯示(全開)
+            window.activeCoreNodes = new Set(window.allCoreNodes);
+
+            closeImportModal();
+            document.getElementById('status-text').innerText = `已成功解析 ${parsedData.length} 筆資料規則`;
+            
+            updateFilterUI();
+            updateAllViews();
+        }
+
+        // 核心邏輯：計算目前「主節點」與「關聯節點」應顯示的所有資料
+        function getVisibleData() {
+            // 全開狀態，直接返回全部資料，節省效能
+            if (window.activeCoreNodes.size === window.allCoreNodes.size) {
+                return parsedData;
+            }
+
+            const visibleRecords = new Set();
+            const globalPublishers = {};
+            
+            parsedData.forEach(d => {
+                if (d.direction.includes('發布') || d.direction.includes('Server')) {
+                    globalPublishers[d.topic] = d.node;
+                }
+            });
+
+            // 1. 加入所有主動勾選節點(Active)的資料
+            parsedData.forEach(d => {
+                if (window.activeCoreNodes.has(d.node)) {
+                    visibleRecords.add(d);
+                }
+            });
+
+            // 2. 智慧掃描：把那些未被勾選的節點，如果跟被勾選的節點有直接關聯，就把該筆「關聯紀錄」加進來
+            parsedData.forEach(d => {
+                if (window.activeCoreNodes.has(d.node)) return; // 已經在 Pass 1 處理過
+
+                // 如果它是訂閱者，它的發布來源是 Active 節點嗎？
+                if (d.direction.includes('訂閱')) {
+                    const pubNode = globalPublishers[d.topic] || d.source;
+                    if (pubNode && window.activeCoreNodes.has(pubNode)) {
+                        visibleRecords.add(d);
+                    }
+                }
+                
+                // 如果它是發布者，有任何 Active 節點訂閱它嗎？
+                if (d.direction.includes('發布') || d.direction.includes('Server')) {
+                    let isSubscribedByActive = false;
+                    visibleRecords.forEach(vd => {
+                        if (vd.direction.includes('訂閱') && vd.topic === d.topic && window.activeCoreNodes.has(vd.node)) {
+                            isSubscribedByActive = true;
+                        }
+                    });
+                    if (isSubscribedByActive) visibleRecords.add(d);
+                }
+                
+                // 如果它是 Client (對 Server 請求)，它的 Server 是 Active 節點嗎？
+                if (d.direction.includes('Client') || d.direction.includes('Service')) {
+                    if (d.source && window.activeCoreNodes.has(d.source)) {
+                        visibleRecords.add(d);
+                    }
+
+                    // 或者，如果它是 Server，有 Active 節點對它做 Client 請求嗎？
+                    let isCalledByActive = false;
+                    visibleRecords.forEach(vd => {
+                        if ((vd.direction.includes('Client') || vd.direction.includes('Service')) && 
+                             vd.source === d.node && window.activeCoreNodes.has(vd.node) && vd.topic === d.topic) {
+                            isCalledByActive = true;
+                        }
+                    });
+                    if (isCalledByActive) visibleRecords.add(d);
+                }
+            });
+
+            return Array.from(visibleRecords);
+        }
+
+        // 更新過濾器 UI (取消隱藏狀態變為水泥灰)
+        function updateFilterUI() {
+            const container = document.getElementById('node-filters');
+            if (!container) return;
+            container.innerHTML = '';
+            
+            if (window.allCoreNodes.size === 0) {
+                container.innerHTML = '<span class="text-xs text-slate-500 italic">請先匯入資料...</span>';
+                return;
+            }
+
+            const sortedNodes = Array.from(window.allCoreNodes).sort();
+
+            sortedNodes.forEach(node => {
+                const isActive = window.activeCoreNodes.has(node);
+                const btn = document.createElement('button');
+                
+                if (isActive) {
+                    btn.className = "px-3 py-1.5 text-xs font-bold rounded-lg bg-oak text-slate-800 border-2 border-oak transition-all shadow-sm transform hover:-translate-y-0.5";
+                } else {
+                    btn.className = "px-3 py-1.5 text-xs font-bold rounded-lg bg-cement text-slate-600 border-2 border-cement transition-all hover:border-oak hover:bg-ecru hover:text-slate-700";
+                }
+                
+                btn.innerText = node;
+                btn.onclick = () => {
+                    if (isActive) window.activeCoreNodes.delete(node);
+                    else window.activeCoreNodes.add(node);
+                    
+                    updateFilterUI();
+                    updateAllViews();
+                };
+                container.appendChild(btn);
+            });
+        }
+
+        function toggleAllFilters(state) {
+            if (state) {
+                window.allCoreNodes.forEach(n => window.activeCoreNodes.add(n));
+            } else {
+                window.activeCoreNodes.clear();
+            }
+            updateFilterUI();
+            updateAllViews();
+        }
+
+        function updateAllViews() {
+            updateMermaidGraph();
+            updateTable();
+            updateNodeCards();
+        }
+
+        // 產生並渲染 Mermaid SVG (透過可視資料過濾並客製化節點樣式)
+        async function updateMermaidGraph() {
+            const container = document.getElementById('mermaid-render-area');
+            
+            if (window.activeCoreNodes.size === 0) {
+                container.innerHTML = '<div class="text-slate-500 font-bold mt-10 text-center">所有主節點皆已隱藏，請從上方勾選要在意的節點。</div>';
+                return;
+            }
+            
+            container.innerHTML = '<div class="text-oak font-bold mt-10 animate-pulse text-lg text-center">圖表產生中，請稍候...</div>';
+
+            const visibleData = getVisibleData();
+
+            window.nodeIdMap = {}; 
+            const coreNodes = new Set();
+            const externalNodes = new Set();
+            const publishers = {};
+            
+            visibleData.forEach(d => {
+                if (d.direction.includes('發布')) publishers[d.topic] = d.node;
+            });
+
+            let mermaidStr = '%%{init: {"flowchart": {"curve": "step"}}}%%\nflowchart LR\n';
+
+            visibleData.forEach(d => {
+                coreNodes.add(d.node);
+                if ((d.direction.includes('訂閱') || d.direction.includes('Client')) && d.source && !window.allCoreNodes.has(d.source)) {
+                    externalNodes.add(d.source);
+                }
+            });
+
+            if (externalNodes.size > 0) {
+                mermaidStr += '    subgraph ExternalGroup ["外部系統 / 來源"]\n';
+                externalNodes.forEach(n => {
+                    const safeId = n.replace(/[^a-zA-Z0-9]/g, '_');
+                    window.nodeIdMap[safeId] = n;
+                    mermaidStr += `        ${safeId}["${n}"]\n`;
+                    mermaidStr += `        click ${safeId} call showNodeDetails("${safeId}") "點擊查看 ${n} 的詳細說明"\n`;
+                    // 外部節點樣式
+                    mermaidStr += `        style ${safeId} fill:#f8fafc,stroke:#cbd5e1,stroke-width:2px,stroke-dasharray: 4 4\n`;
+                });
+                mermaidStr += '    end\n\n';
+            }
+
+            mermaidStr += '    subgraph CoreGroup ["內部運算節點 (Core Nodes)"]\n';
+            coreNodes.forEach(n => {
+                const safeId = n.replace(/[^a-zA-Z0-9]/g, '_');
+                window.nodeIdMap[safeId] = n;
+                mermaidStr += `        ${safeId}["${n}"]\n`;
+                mermaidStr += `        click ${safeId} call showNodeDetails("${safeId}") "點擊查看 ${n} 的詳細說明"\n`;
+                
+                // 動態設定樣式：主選節點(實線/白底)，關聯節點(虛線/沙色底)
+                if (window.activeCoreNodes.has(n)) {
+                    mermaidStr += `        style ${safeId} fill:#ffffff,stroke:#D9C5B2,stroke-width:3px\n`;
+                } else {
+                    mermaidStr += `        style ${safeId} fill:#F3EFE0,stroke:#A9A9A9,stroke-width:2px,stroke-dasharray: 5 5\n`;
+                }
+            });
+            mermaidStr += '    end\n\n';
+
+            let edges = new Set();
+            visibleData.forEach(d => {
+                const nodeId = d.node.replace(/[^a-zA-Z0-9]/g, '_');
+                const safeTopic = d.topic.replace(/"/g, "'"); 
+                
+                if (d.direction.includes('訂閱')) {
+                    let fromNode = publishers[d.topic] ? publishers[d.topic] : d.source;
+                    if (!fromNode || fromNode === '-') return;
+                    let fromId = fromNode.replace(/[^a-zA-Z0-9]/g, '_');
+                    let edge = `    ${fromId} -- "${safeTopic}" --> ${nodeId}\n`;
+                    if (!edges.has(edge)) { mermaidStr += edge; edges.add(edge); }
+                } 
+                else if (d.direction.includes('Client') || d.direction.includes('Service')) {
+                    let toNode = d.source;
+                    if (!toNode || toNode === '-') return;
+                    let toId = toNode.replace(/[^a-zA-Z0-9]/g, '_');
+                    let edge = `    ${nodeId} -- "${d.type}: ${safeTopic}" --> ${toId}\n`;
+                    if (!edges.has(edge)) { mermaidStr += edge; edges.add(edge); }
+                }
+            });
+
+            // 背景群組框線簡化，依賴節點本身的顏色來區分
+            mermaidStr += '\n    %% 群組外框設定\n';
+            mermaidStr += '    style ExternalGroup fill:none,stroke:#e0d3c5,stroke-width:2px,stroke-dasharray: 5 5\n';
+            mermaidStr += '    style CoreGroup fill:none,stroke:#D9C5B2,stroke-width:2px\n';
+
+            try {
+                const { svg, bindFunctions } = await mermaid.render('dynamic-mermaid-graph', mermaidStr);
+                container.innerHTML = svg;
+                if (bindFunctions) bindFunctions(container);
+                bindEdgeClicks(container);
+            } catch (err) {
+                container.innerHTML = `<div class="text-red-500">圖表渲染失敗: <pre>${err.message}</pre></div>`;
+            }
+        }
+
+        function bindEdgeClicks(container) {
+            const edgeLabels = container.querySelectorAll('.edgeLabel');
+            edgeLabels.forEach(el => {
+                el.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    let labelText = el.textContent.trim();
+                    let actualTopic = labelText.replace(/^(Action|Service):\s*/, '');
+                    showTopicDetails(actualTopic);
+                });
+            });
+        }
+
+        // 顯示 Topic 的詳細資訊 (使用原始資料以確保點擊時看得到全貌)
+        window.showTopicDetails = function(topicName) {
+            document.getElementById('detail-topic-name').innerText = topicName;
+            const contentDiv = document.getElementById('detail-topic-content');
+            contentDiv.innerHTML = '';
+
+            const records = parsedData.filter(d => d.topic === topicName || d.topic.replace(/"/g, "'") === topicName);
+
+            if (records.length === 0) {
+                contentDiv.innerHTML = '<p class="text-slate-500 p-4 font-bold">無法找到此介面的詳細資料。</p>';
+            } else {
+                let senders = new Set();
+                let receivers = new Set();
+
+                records.forEach(r => {
+                    if (r.direction.includes('發布')) {
+                        senders.add(r.node);
+                    } else if (r.direction.includes('訂閱')) {
+                        receivers.add(r.node);
+                        if (r.source && r.source !== '-' && !r.source.includes('外部') && r.source !== 'External') {
+                            senders.add(r.source);
+                        }
+                    } else if (r.direction.includes('Client') || r.direction.includes('Service')) {
+                        senders.add(r.node);
+                        if (r.source && r.source !== '-' && !r.source.includes('外部') && r.source !== 'External') {
+                            receivers.add(r.source);
+                        }
+                    }
+                });
+
+                const senderText = senders.size > 0 ? Array.from(senders).join(', ') : '外部 / 未知';
+                const receiverText = receivers.size > 0 ? Array.from(receivers).join(', ') : '外部 / 未知';
+
+                let detailRecords = records.filter(d => d.direction.includes('訂閱'));
+                if (detailRecords.length === 0) { detailRecords = records; }
+
+                const typeText = records[0].type;
+
+                let html = `
+                    <div class="border border-oak/30 rounded-2xl bg-white shadow-sm overflow-hidden mb-6">
+                        <div class="bg-cement/50 p-6 border-b border-oak/30">
+                            <div class="flex flex-col md:flex-row items-center justify-center gap-3 w-full max-w-2xl mx-auto">
+                                <div class="flex-1 flex justify-end w-full md:w-auto">
+                                    <div class="px-4 py-2.5 bg-white border-2 border-oak rounded-xl text-sm md:text-base font-bold text-slate-800 shadow-sm flex items-center gap-2 text-center md:text-right">
+                                        <svg class="w-4 h-4 text-oak shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01"></path></svg>
+                                        ${senderText}
+                                    </div>
+                                </div>
+                                <div class="flex flex-col items-center justify-center min-w-[120px] px-2 relative py-2 md:py-0">
+                                    <div class="text-[10px] mb-1.5 font-mono font-bold text-slate-800 bg-ecru px-2.5 py-1 rounded-full border border-oak truncate max-w-[200px]" title="${topicName}">
+                                        ${topicName}
+                                    </div>
+                                    <div class="flex items-center w-full relative">
+                                        <div class="h-[3px] bg-oak w-full rounded"></div>
+                                        <svg class="w-5 h-5 text-oak absolute -right-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M9 5l7 7-7 7"></path></svg>
+                                    </div>
+                                    <span class="text-[10px] mt-1.5 font-bold text-slate-500">
+                                        ${typeText}
+                                    </span>
+                                </div>
+                                <div class="flex-1 flex justify-start w-full md:w-auto">
+                                    <div class="px-4 py-2.5 bg-white border-2 border-cement rounded-xl text-sm md:text-base font-bold text-slate-800 shadow-sm flex items-center gap-2 text-center md:text-left">
+                                        <svg class="w-4 h-4 text-cement shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
+                                        ${receiverText}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="p-5">
+                `;
+
+                html += detailRecords.map(d => `
+                            <div class="${detailRecords.length > 1 ? 'mb-6 border-b border-cement pb-4 last:border-0 last:mb-0 last:pb-0' : ''}">
+                                ${detailRecords.length > 1 ? `<h4 class="font-bold text-slate-800 mb-3 text-sm flex items-center gap-2"><svg class="w-4 h-4 text-oak" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg> 接收節點 [${d.node}] 的處理細節</h4>` : ''}
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm mb-5">
+                                    <div class="bg-cement/30 p-3.5 rounded-xl border border-oak/20">
+                                        <span class="text-slate-500 block text-[10px] uppercase font-bold mb-1.5 tracking-wider">Callback 函式</span> 
+                                        <code class="text-slate-800 font-mono text-xs break-all">${d.callback}</code>
+                                    </div>
+                                    <div class="bg-cement/30 p-3.5 rounded-xl border border-oak/20">
+                                        <span class="text-slate-500 block text-[10px] uppercase font-bold mb-1.5 tracking-wider">資料格式 / 訊息型別</span> 
+                                        <code class="text-slate-800 font-mono text-xs block overflow-x-auto whitespace-pre-wrap">${d.dataFormat !== '-' ? d.dataFormat : d.msgType}</code>
+                                    </div>
+                                </div>
+                                <div class="p-4 rounded-xl border-l-4 border-oak bg-cement/50 text-slate-800 text-sm leading-relaxed">
+                                    <span class="text-slate-900 font-bold text-xs block mb-2 flex items-center gap-1.5">
+                                        <svg class="w-4 h-4 text-oak" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                                        介面說明
+                                    </span>
+                                    ${d.desc ? d.desc : '<span class="text-slate-500 italic font-bold">無詳細說明</span>'}
+                                </div>
+                            </div>
+                `).join('');
+
+                html += `</div></div>`;
+                contentDiv.innerHTML = html;
+            }
+            openTopicDetailModal();
+        };
+
+        // 顯示 Node 的詳細資訊 (使用原始資料確保完整性)
+        window.showNodeDetails = function(safeId) {
+            const originalName = window.nodeIdMap[safeId];
+            if (!originalName) return;
+            document.getElementById('detail-node-name').innerText = originalName;
+            const contentDiv = document.getElementById('detail-node-content');
+            contentDiv.innerHTML = '';
+
+            const nodeData = parsedData.filter(d => d.node === originalName || d.source === originalName);
+
+            if (nodeData.length === 0) {
+                contentDiv.innerHTML = '<p class="text-slate-500 font-bold">無相關詳細資料。</p>';
+            } else {
+                const pubs = nodeData.filter(d => d.node === originalName && d.direction.includes('發布'));
+                const subs = nodeData.filter(d => d.node === originalName && d.direction.includes('訂閱'));
+                const acts = nodeData.filter(d => d.node === originalName && (d.direction.includes('Client') || d.direction.includes('Service')));
+                const asSource = nodeData.filter(d => d.source === originalName && d.direction.includes('訂閱'));
+
+                contentDiv.innerHTML = `
+                    ${generateDetailSection('發布 (Publishers)', pubs, 'text-slate-800', 'bg-cement border-oak')}
+                    ${generateDetailSection('訂閱 (Subscribers)', subs, 'text-slate-800', 'bg-cement border-oak')}
+                    ${generateDetailSection('Action / Service', acts, 'text-slate-800', 'bg-cement border-slate-300')}
+                    ${generateDetailSection('作為來源輸出給其他節點', asSource, 'text-slate-800', 'bg-cement border-oak')}
+                `;
+            }
+            openNodeDetailModal();
+        };
+
+        function generateDetailSection(title, data, textColor, customStyle) {
+            if (data.length === 0) return '';
+            let itemsHtml = data.map(d => `
+                <div class="border border-oak/20 rounded-lg p-4 mb-3 hover:shadow-md transition-shadow bg-white">
+                    <div class="flex flex-wrap items-start justify-between mb-2 gap-2">
+                        <div class="flex items-center gap-2">
+                            <span class="font-mono font-bold text-sm ${textColor}">${d.topic}</span>
+                            <span class="text-[10px] px-2 py-0.5 rounded bg-cement/50 text-slate-700 font-medium border border-oak/30">${d.msgType || '未知型別'}</span>
+                        </div>
+                        <span class="text-[10px] px-2 py-0.5 rounded ${customStyle} font-bold">${d.type}</span>
+                    </div>
+                    <div class="text-sm text-slate-700 bg-cement/30 p-3 rounded border-l-2 border-oak">
+                        ${d.desc ? d.desc : '<span class="text-slate-400 italic font-bold">無詳細說明</span>'}
+                    </div>
+                </div>
+            `).join('');
+            return `<div class="mb-6"><h3 class="text-md font-bold text-slate-800 mb-3 border-b border-oak/30 pb-2 flex items-center gap-2"><div class="w-2 h-2 rounded-full bg-oak"></div>${title} <span class="text-xs font-normal text-slate-500 ml-2">(${data.length})</span></h3>${itemsHtml}</div>`;
+        }
+
+        function openNodeDetailModal() { toggleModal('node-detail-modal', 'node-detail-modal-content', true); }
+        function closeNodeDetailModal() { toggleModal('node-detail-modal', 'node-detail-modal-content', false); }
+        function openTopicDetailModal() { toggleModal('topic-detail-modal', 'topic-detail-modal-content', true); }
+        function closeTopicDetailModal() { toggleModal('topic-detail-modal', 'topic-detail-modal-content', false); }
+        function openImportModal() { toggleModal('import-modal', 'import-modal-content', true); }
+        function closeImportModal() { toggleModal('import-modal', 'import-modal-content', false); }
+
+        function toggleModal(bgId, contentId, show) {
+            const bg = document.getElementById(bgId);
+            const content = document.getElementById(contentId);
+            if(show) {
+                bg.classList.remove('hidden');
+                setTimeout(() => { bg.classList.remove('opacity-0'); content.classList.remove('scale-95'); }, 10);
+            } else {
+                bg.classList.add('opacity-0');
+                content.classList.add('scale-95');
+                setTimeout(() => { bg.classList.add('hidden'); }, 300);
+            }
+        }
+
+        function exportStandaloneHTML() {
+            if (parsedData.length === 0) {
+                alert("請先匯入資料產生圖表後，再執行匯出！");
+                return;
+            }
+
+            const htmlClone = document.documentElement.cloneNode(true);
+
+            const renderArea = htmlClone.querySelector('#mermaid-render-area');
+            if(renderArea) renderArea.innerHTML = '<div class="text-oak mt-10 font-bold">圖表產生中...</div>';
+            
+            const nodeCards = htmlClone.querySelector('#node-cards-container');
+            if(nodeCards) nodeCards.innerHTML = '';
+            
+            const tableBody = htmlClone.querySelector('#data-table-body');
+            if(tableBody) tableBody.innerHTML = '<tr><td colspan="5" class="px-6 py-8 text-center text-slate-400">載入中...</td></tr>';
+
+            const modals = htmlClone.querySelectorAll('[id$="-modal"]');
+            modals.forEach(modal => {
+                modal.classList.add('hidden', 'opacity-0');
+                const content = modal.querySelector('div');
+                if(content) content.classList.add('scale-95');
+            });
+
+            const initScript = htmlClone.ownerDocument.createElement('script');
+            initScript.textContent = `
+                window.addEventListener('DOMContentLoaded', () => {
+                    parsedData = ${JSON.stringify(parsedData)};
+                    window.allCoreNodes = new Set(${JSON.stringify(Array.from(window.allCoreNodes))});
+                    window.activeCoreNodes = new Set(${JSON.stringify(Array.from(window.activeCoreNodes))});
+                    document.getElementById('status-text').innerText = '已成功載入匯出的資料 (' + parsedData.length + ' 筆)';
+                    updateFilterUI();
+                    updateAllViews();
+                });
+            `;
+            htmlClone.querySelector('body').appendChild(initScript);
+
+            const finalHtml = "<!DOCTYPE html>\n<html lang=\"zh-TW\">\n" + htmlClone.innerHTML + "\n</html>";
+
+            const blob = new Blob([finalHtml], { type: 'text/html;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'ros_topology_graph.html';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+
+        // 更新表格視圖 (透過過濾後的可視資料，並加上關聯標籤)
+        function updateTable() {
+            const tbody = document.getElementById('data-table-body');
+            tbody.innerHTML = '';
+            
+            const visibleData = getVisibleData();
+            
+            if (visibleData.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="5" class="px-6 py-8 text-center text-slate-400">目前沒有選擇任何節點，故無資料可顯示。</td></tr>';
+                return;
+            }
+
+            visibleData.forEach(d => {
+                const tr = document.createElement('tr');
+                tr.className = "hover:bg-cement/30 transition-colors";
+                const isTopic = d.type.toLowerCase() === 'topic';
+                const typeStyle = isTopic ? 'bg-oak/30 text-slate-800' : 'bg-cement/50 text-slate-800';
+                const desc = d.desc.length > 50 ? d.desc.substring(0, 50) + '...' : d.desc;
+
+                // 標示是否為被動拉進來的「關聯節點」
+                const isContext = !window.activeCoreNodes.has(d.node);
+                const nodeBadge = isContext ? `<span class="ml-2 px-1.5 py-0.5 bg-cement text-white rounded text-[10px]">關聯</span>` : '';
+
+                tr.innerHTML = `
+                    <td class="px-6 py-4 font-bold text-slate-800">${d.node} ${nodeBadge}</td>
+                    <td class="px-6 py-4 whitespace-nowrap"><span class="px-2 py-1 rounded text-[10px] font-bold ${typeStyle}">${d.type}</span> <span class="text-slate-600">${d.direction}</span></td>
+                    <td class="px-6 py-4 font-mono text-slate-700 text-xs">${d.topic}</td>
+                    <td class="px-6 py-4 text-slate-500 text-xs font-bold">${d.msgType || '-'}</td>
+                    <td class="px-6 py-4 text-xs text-slate-600 truncate max-w-xs" title="${d.desc}">${desc || '-'}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        // 更新下方卡片 (透過過濾後的可視資料，並加上關聯標籤)
+        function updateNodeCards() {
+            const container = document.getElementById('node-cards-container');
+            container.innerHTML = '';
+            const nodeStats = {};
+            
+            const visibleData = getVisibleData();
+
+            visibleData.forEach(d => {
+                if (!nodeStats[d.node]) nodeStats[d.node] = { pubs: [], subs: [], acts: [] };
+                
+                if (d.direction.includes('發布')) nodeStats[d.node].pubs.push(d.topic);
+                else if (d.direction.includes('訂閱')) nodeStats[d.node].subs.push(d.topic);
+                else if (d.direction.includes('Client') || d.direction.includes('Service')) nodeStats[d.node].acts.push(d.topic);
+            });
+
+            const nodes = Object.keys(nodeStats).filter(k => nodeStats[k].pubs.length > 0 || nodeStats[k].subs.length > 0 || nodeStats[k].acts.length > 0);
+            
+            if (nodes.length === 0) {
+                container.innerHTML = '<div class="col-span-1 md:col-span-3 text-center text-slate-400 py-10 font-bold">請於上方勾選您在意的節點，此處將顯示其通訊介面總覽。</div>';
+                return;
+            }
+
+            nodes.forEach((nodeName, index) => {
+                const stats = nodeStats[nodeName];
+                const card = document.createElement('div');
+                const borderColors = ['border-oak', 'border-cement'];
+                const borderColor = borderColors[index % borderColors.length];
+
+                let detailsHtml = '';
+                if (stats.pubs.length > 0) detailsHtml += `<div class="flex items-start gap-2 text-xs"><span class="w-8 text-slate-700 font-bold uppercase text-[9px] mt-1 bg-cement text-center rounded">Pub</span><div class="flex flex-wrap gap-1 flex-1">${stats.pubs.slice(0, 3).map(t => `<code class="bg-cement/50 border border-oak/30 px-1.5 py-0.5 rounded text-[10px] text-slate-700 truncate max-w-[150px] block" title="${t}">${t}</code>`).join('')}${stats.pubs.length > 3 ? `<span class="text-[10px] text-slate-500 mt-0.5 font-bold">+${stats.pubs.length - 3}</span>` : ''}</div></div>`;
+                if (stats.subs.length > 0) detailsHtml += `<div class="flex items-start gap-2 text-xs"><span class="w-8 text-slate-700 font-bold uppercase text-[9px] mt-1 bg-cement text-center rounded">Sub</span><div class="flex flex-wrap gap-1 flex-1">${stats.subs.slice(0, 3).map(t => `<code class="bg-cement/50 border border-oak/30 px-1.5 py-0.5 rounded text-[10px] text-slate-700 truncate max-w-[150px] block" title="${t}">${t}</code>`).join('')}${stats.subs.length > 3 ? `<span class="text-[10px] text-slate-500 mt-0.5 font-bold">+${stats.subs.length - 3}</span>` : ''}</div></div>`;
+                if (stats.acts.length > 0) detailsHtml += `<div class="flex items-start gap-2 text-xs"><span class="w-8 text-slate-700 font-bold uppercase text-[9px] mt-1 bg-cement text-center rounded">Act</span><div class="flex flex-wrap gap-1 flex-1">${stats.acts.slice(0, 3).map(t => `<code class="bg-cement/50 border border-oak/30 px-1.5 py-0.5 rounded text-[10px] text-slate-700 truncate max-w-[150px] block" title="${t}">${t}</code>`).join('')}${stats.acts.length > 3 ? `<span class="text-[10px] text-slate-500 mt-0.5 font-bold">+${stats.acts.length - 3}</span>` : ''}</div></div>`;
+
+                // 右上角標示該卡片是 主動選取的 還是 關係延伸出來的
+                const isContext = !window.activeCoreNodes.has(nodeName);
+                const nodeBadge = isContext ? 
+                    `<span class="text-[10px] bg-cement text-white px-2 py-0.5 rounded-full font-bold shrink-0 ml-2 shadow-sm">關聯節點</span>` : 
+                    `<span class="text-[10px] bg-ecru text-slate-700 border border-oak/30 px-2 py-0.5 rounded-full font-bold shrink-0 shadow-sm">主節點</span>`;
+
+                card.className = `node-card bg-white p-5 rounded-xl shadow-md border-t-4 ${borderColor} flex flex-col h-full border-slate-100 relative`;
+                card.innerHTML = `<div class="flex justify-between items-start mb-3"><h3 class="font-bold text-slate-800 text-lg truncate pr-2" title="${nodeName}">${nodeName}</h3>${nodeBadge}</div><div class="mt-auto space-y-2.5">${detailsHtml || '<p class="text-xs text-slate-400 font-bold italic">無特定對外介面</p>'}</div>`;
+                container.appendChild(card);
+            });
+        }
+
+        function switchView(view) {
+            const graphView = document.getElementById('graph-view');
+            const tableView = document.getElementById('table-view');
+            const btnGraph = document.getElementById('btn-graph');
+            const btnTable = document.getElementById('btn-table');
+            if (view === 'graph') {
+                graphView.classList.remove('hidden'); tableView.classList.add('hidden');
+                btnGraph.className = "bg-slate-800 text-white px-4 py-2 rounded-full font-bold transition-all shadow-md";
+                btnTable.className = "bg-white text-slate-500 border border-slate-300 px-4 py-2 rounded-full font-bold transition-all hover:bg-slate-50";
+            } else {
+                graphView.classList.add('hidden'); tableView.classList.remove('hidden');
+                btnTable.className = "bg-slate-800 text-white px-4 py-2 rounded-full font-bold transition-all shadow-md";
+                btnGraph.className = "bg-white text-slate-500 border border-slate-300 px-4 py-2 rounded-full font-bold transition-all hover:bg-slate-50";
+            }
+        }
+    </script>
+</body>
+</html>
