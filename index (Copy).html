@@ -74,25 +74,24 @@
                 <div>
                     <h1 class="text-xl font-bold text-slate-800">ROS 系統拓撲可視化</h1>
                     <p class="text-xs text-slate-500" id="status-text">自動解析節點發布與訂閱關係</p>
-                    <p class="text-[10px] text-slate-400 mt-0.5 font-medium">KanMingKai / ros-topology-visualizer</p>
                 </div>
             </div>
             <div class="flex gap-4 text-sm items-center flex-wrap">
-                <button id="btn-import" onclick="openImportModal()" class="bg-oak hover:opacity-80 text-slate-900 px-4 py-2 rounded-full font-bold transition-all shadow-sm flex items-center gap-2">
+                <button onclick="openImportModal()" class="bg-oak hover:opacity-80 text-slate-900 px-4 py-2 rounded-full font-bold transition-all shadow-sm flex items-center gap-2">
                     <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
                     </svg>
                     匯入更新圖表
                 </button>
                 
-                <button id="btn-export" onclick="exportStandaloneHTML()" class="bg-slate-700 hover:bg-slate-800 text-white px-4 py-2 rounded-full font-bold transition-all shadow-sm flex items-center gap-2">
+                <button onclick="exportStandaloneHTML()" class="bg-slate-700 hover:bg-slate-800 text-white px-4 py-2 rounded-full font-bold transition-all shadow-sm flex items-center gap-2">
                     <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
                     </svg>
                     匯出 HTML
                 </button>
 
-                <div id="nav-separator" class="w-px h-6 bg-slate-300 mx-2 hidden md:block opacity-50"></div>
+                <div class="w-px h-6 bg-slate-300 mx-2 hidden md:block opacity-50"></div>
                 <button onclick="switchView('graph')" id="btn-graph" class="bg-slate-800 text-white px-4 py-2 rounded-full font-bold transition-all shadow-md">拓撲圖視圖</button>
                 <button onclick="switchView('table')" id="btn-table" class="bg-white text-slate-600 border border-slate-300 px-4 py-2 rounded-full font-bold transition-all hover:bg-slate-50">原始資料表</button>
             </div>
@@ -173,8 +172,8 @@
     <!-- 加入個人資訊的頁尾 -->
     <footer class="mt-auto py-6 pb-8 text-center">
         <p class="text-sm font-bold text-slate-700/80"> 
-            <a href="https://github.com/KanMingKai/ros-topology-visualizer" target="_blank" class="hover:text-slate-900 underline decoration-slate-400 underline-offset-4 transition-colors">
-                KanMingKai / ros-topology-visualizer
+            <a href="mailto:mingkaikan@gmail.com " class="hover:text-slate-900 underline decoration-slate-400 underline-offset-4 transition-colors">
+                mingkaikan@gmail.com
             </a>
         </p>
     </footer>
@@ -811,20 +810,6 @@
 
             const htmlClone = document.documentElement.cloneNode(true);
 
-            // 移除匯出檔案中的「匯入」與「匯出」按鈕及分隔線
-            const btnImport = htmlClone.querySelector('#btn-import');
-            if (btnImport) btnImport.remove();
-            
-            const btnExport = htmlClone.querySelector('#btn-export');
-            if (btnExport) btnExport.remove();
-            
-            const navSeparator = htmlClone.querySelector('#nav-separator');
-            if (navSeparator) navSeparator.remove();
-
-            // 順便移除隱藏的匯入 Modal，讓匯出檔案的原始碼更乾淨
-            const importModal = htmlClone.querySelector('#import-modal');
-            if (importModal) importModal.remove();
-
             const renderArea = htmlClone.querySelector('#mermaid-render-area');
             if(renderArea) renderArea.innerHTML = '<div class="text-oak mt-10 font-bold">圖表產生中...</div>';
             
@@ -962,106 +947,6 @@
                 btnGraph.className = "bg-white text-slate-500 border border-slate-300 px-4 py-2 rounded-full font-bold transition-all hover:bg-slate-50";
             }
         }
-
-        // 預設載入的測試資料
-        const DEFAULT_DATA = `節點	介面類型	方向	Topic / Action / Service 名稱	訊息 / Action / Service 型別	來源節點（訂閱時）	Callback	資料格式	說明	行號
-◆  Diagnostic									
-Diagnostic	Topic	發布 ↑	/diagnostic_status	String			{"node": "xxx", "status": "OK|WARN|ERROR", "message": "..."}	各節點健康狀態匯總，定時廣播系統診斷資訊	14
-Diagnostic	Topic	訂閱 ↓	/imu	Imu	外部 / 未知		sensor_msgs/Imu	IMU 原始資料，用於診斷機器人姿態與震動狀態	38
-Diagnostic	Topic	訂閱 ↓	/joint_states_in	JointState	外部 / 未知		sensor_msgs/JointState	關節狀態原始輸入，診斷驅動輪運行狀況	40
-Diagnostic	Topic	訂閱 ↓	/odom	Odometry	外部 / 未知		nav_msgs/Odometry	里程計資料，診斷機器人移動是否正常	39
-Diagnostic	Topic	訂閱 ↓	/scan	LaserScan	外部 / 未知		sensor_msgs/LaserScan	前方 LiDAR 掃描資料，診斷感測器是否正常運作	36
-Diagnostic	Topic	訂閱 ↓	/scan_b	LaserScan	外部 / 未知		sensor_msgs/LaserScan	後方 LiDAR 掃描資料，診斷感測器是否正常運作	37
-◆  GlobalPlanner									
-GlobalPlanner	Topic	發布 ↑	/current_station	String			{"id": 4, "station_type": "docking", "exit_strategy": "reverse"}	定時廣播機器人最近站點 ID 與屬性，過濾 -1，站點變化時 log	29
-GlobalPlanner	Topic	發布 ↑	/exit_node_result	String			{"node_id": 3, "x": 1.25, "y": 4.80}	docking 站退出節點計算結果，含節點 ID 與座標，node_id=-1 代表失敗	37
-GlobalPlanner	Topic	發布 ↑	/path_warning	String			"⚠️ 偏離路徑: 1.23m"	機器人偏離路線邊超過 DEVIATION_LIMIT(1.0m) 時發出警告	33
-GlobalPlanner	Topic	發布 ↑	/planned_path	Int32MultiArray			Int32MultiArray，節點 ID 序列，如 [3, 5, 6, 7]	BFS 算路結果，通知 TA 狀態切換至 EXECUTING	23
-GlobalPlanner	Topic	發布 ↑	/route_mission	Int32MultiArray			Int32MultiArray，節點 ID 序列，如 [3, 5, 6, 7]	算路完成後直接下任務給 RE，延遲 0.2s 確保座標先到	41
-GlobalPlanner	Topic	發布 ↑	/route_mission_coords	String			{"3": {"x": 1.25, "y": 4.80, "station_type": "", "exit_strategy": ""}}	路徑節點座標與屬性，供 RE 帶給 LP 計算 spin yaw error	45
-GlobalPlanner	Topic	訂閱 ↓	/request_exit_node	String	TaskAgent	request_exit_node_callback	{"station_id": 4}	TA 在 docking 站出發時觸發，請 GP 用 TF+內積計算後方退出節點	56
-GlobalPlanner	Topic	訂閱 ↓	/request_path	String	TaskAgent	request_path_callback	{"start": 3, "goal": 7}	TA 請求 BFS 算路，帶入起點與終點節點 ID	52
-GlobalPlanner	Topic	訂閱 ↓	/robot_pose_odom	Odometry	RobotPosePublisher	robot_pose_callback	nav_msgs/Odometry（frame_id=map, child_frame_id=L_BASE_FOOTPRINT）	map frame 下的完整 Odometry，格式與 /odom 相同，twist 來自原始 /odom	60
-◆  HeaderFixerCombined									
-HeaderFixerCombined	Topic	發布 ↑	<var:joint_output_topic>	JointState			sensor_msgs/JointState（frame_id 已修正）	修正 header frame_id 後的關節狀態輸出，對應參數 output_topic	35
-HeaderFixerCombined	Topic	發布 ↑	<var:laser_output_topic>	LaserScan			sensor_msgs/LaserScan（frame_id 已修正）	修正 header frame_id 後的 LiDAR 掃描輸出，對應參數 output_topic_2	58
-HeaderFixerCombined	Topic	發布 ↑	<var:odom_output_topic>	Odometry			nav_msgs/Odometry（frame_id 已修正）	修正 header frame_id 後的里程計輸出，對應參數 output_topic_3	84
-HeaderFixerCombined	Topic	訂閱 ↓	<var:joint_input_topic>	JointState	外部 / 未知	joint_callback	sensor_msgs/JointState	原始關節狀態輸入，frame_id 由參數 target_frame_id 指定	36
-HeaderFixerCombined	Topic	訂閱 ↓	<var:laser_input_topic>	LaserScan	外部 / 未知	laser_callback	sensor_msgs/LaserScan	原始 LiDAR 掃描輸入，frame_id 由參數 target_frame_id_2 指定	59
-HeaderFixerCombined	Topic	訂閱 ↓	<var:odom_input_topic>	Odometry	外部 / 未知	odometry_callback	nav_msgs/Odometry	原始里程計輸入，frame_id 由參數 target_frame_id_3 指定	85
-◆  InitialPosePublisher									
-InitialPosePublisher	Topic	發布 ↑	initialpose	PoseWithCovarianceStamped			geometry_msgs/PoseWithCovarianceStamped	啟動時發送初始位置給 AMCL，讓粒子濾波器從正確位置開始收斂	17
-◆  LocalPlanner									
-LocalPlanner	Topic	發布 ↑	/base_status	String			"DONE" | "FAIL" | "ALIGN_STRAIGHT" | "ALIGN_SPINNING" | "NAVIGATING" | "ESCAPING"	精細動作執行狀態，TA 根據當前狀態決定下一步（倒車/finetune 完成回報）	90
-LocalPlanner	Topic	發布 ↑	/lp_follow_status	String			"DONE" | "FAIL"	FollowPath 執行結果回報給 RE，RE 據此推進下一路網段或累加 retry	93
-LocalPlanner	Topic	發布 ↑	/lp_state	String			"STATE_IDLE" | "STATE_ROUTE_SPINNING" | "STATE_ROUTE_FOLLOWING" | "STATE_ALIGNING" | "STATE_SPINNING" | "STATE_ESCAPING"	LP 內部詳細狀態，供除錯與監控使用	91
-LocalPlanner	Topic	訂閱 ↓	/local_backup_trigger	String	TaskAgent	local_backup_callback	{"node_id": 3, "x": 1.25, "y": 4.80}	TA 觸發 LP 倒車，含目標節點 ID 與 map frame 座標，LP 查 TF 計算實際距離	145
-LocalPlanner	Topic	訂閱 ↓	/local_finetune	Twist	TaskAgent	finetune_callback	geometry_msgs/Twist（linear.x/y=位移m, angular.z=轉角度）	TA 轉發的微調指令，LP 拆解為 ALIGN_SPINNING / ALIGN_STRAIGHT queue 執行	149
-LocalPlanner	Topic	訂閱 ↓	/planned_route_path	String	RouteExecutor	planned_route_path_callback	{"poses": [{"x":..,"y":..,"z":..,"qx":..,"qy":..,"qz":..,"qw":..},...], "end_x": 4.5, "end_y": 2.1}	RE 發來的路網段 path，LP 先判斷 yaw error 決定是否 Spin，再執行 FollowPath	141
-LocalPlanner	Topic	訂閱 ↓	cmd_stop	Bool	外部 / 未知	cmd_stop_callback	std_msgs/Bool（True）	緊急停止，cancel 所有 Action goal，清空任務佇列，finetune_busy 解鎖	152
-LocalPlanner	Action	Client →	backup	BackUp	Nav2		nav2_msgs/action/BackUp（target.x=距離m, speed=0.1）	逃脫序列：連續失敗 MAX_RETRY 次後後退 0.3m，同時清空 local costmap	103
-LocalPlanner	Action	Client →	dock_robot	DockRobot	Nav2		nav2_msgs/action/DockRobot（dock_id, navigate_to_staging_pose=True）	自動對接 docking 站，use_docking_server=true 時啟用	105
-LocalPlanner	Action	Client →	drive_on_heading	DriveOnHeading	Nav2		nav2_msgs/action/DriveOnHeading（target.x=距離m, speed=±0.25）	直線行駛，負距離=後退；用於倒車退出 docking 站與 finetune 位移	102
-LocalPlanner	Action	Client →	follow_path	FollowPath	Nav2		nav2_msgs/action/FollowPath（path, controller_id='FollowPath'）	沿 RE 提供的 path 執行路網段跟隨，完成後回報 /lp_follow_status	101
-LocalPlanner	Action	Client →	navigate_to_pose	NavigateToPose	Nav2		nav2_msgs/action/NavigateToPose（pose.header.frame_id='map'）	finetune 長距離（>1.2m）時使用，導航至目標 map 座標	104
-LocalPlanner	Action	Client →	spin	Spin	Nav2		nav2_msgs/action/Spin（target_yaw=弧度）	原地旋轉，用於路網段偏航修正與 finetune 轉向	100
-LocalPlanner	Action	Client →	undock_robot	UndockRobot	Nav2		nav2_msgs/action/UndockRobot（dock_type）	從 docking 站脫離，use_docking_server=true 時啟用	106
-LocalPlanner	Service	Client →	/local_costmap/clear_entirely_local_costmap	ClearEntireCostmap	Nav2 / ROS2		nav2_msgs/srv/ClearEntireCostmap	受阻或逃脫序列時清空 local costmap，讓路徑重新計算	111
-◆  MapAnnotator									
-MapAnnotator	Topic	訂閱 ↓	/clicked_point	PointStamped	外部 / 未知	point_callback	geometry_msgs/PointStamped	RViz 點擊地圖事件，用於地圖標注工具互動	13
-MapAnnotator	Topic	訂閱 ↓	/clicked_point	PointStamped	外部 / 未知	point_callback	geometry_msgs/PointStamped	RViz 點擊地圖事件，用於地圖標注工具互動	13
-◆  MissionBridgeNode									
-MissionBridgeNode	Topic	發布 ↑	/cmd_stop	Bool			std_msgs/Bool（True）	Bridge 發出緊急停止指令，RE 和 LP 收到後 cancel 所有 Action	42
-MissionBridgeNode	Topic	發布 ↑	/finetune_cmd	Twist			geometry_msgs/Twist（linear.x/y=位移m, angular.z=轉角度）	操作員透過 Bridge 下發微調指令，TA 收到後轉發給 LP	41
-MissionBridgeNode	Topic	發布 ↑	/target_station	String			{"target_station": 7}	操作員透過 Bridge 下發目標站點 ID，TA 收到後啟動任務流程	40
-◆  OdometryTFBroadcaster									
-OdometryTFBroadcaster	Topic	訂閱 ↓	<var:odom_topic>	Odometry	外部 / 未知	odom_callback	nav_msgs/Odometry	訂閱里程計資料，廣播 odom→L_BASE_FOOTPRINT TF，frame_id 由參數 odom_topic 指定	23
-◆  RecoveryArbiterNode									
-RecoveryArbiterNode	Topic	發布 ↑	/cmd_vel	Twist			geometry_msgs/Twist（linear.x=縱向速度, angular.z=轉向速度）	仲裁後輸出至底盤的最終速度指令，手動優先於自動	18
-RecoveryArbiterNode	Topic	發布 ↑	/cmd_vel	Twist			geometry_msgs/Twist（linear.x=縱向速度, angular.z=轉向速度）	仲裁後輸出至底盤的最終速度指令，手動優先於自動	18
-RecoveryArbiterNode	Topic	訂閱 ↓	/cmd_vel_auto	Twist	外部 / 未知	auto_callback	geometry_msgs/Twist	Nav2 controller 輸出的自動導航速度指令	12
-RecoveryArbiterNode	Topic	訂閱 ↓	/cmd_vel_auto	Twist	外部 / 未知	auto_callback	geometry_msgs/Twist	Nav2 controller 輸出的自動導航速度指令	12
-RecoveryArbiterNode	Topic	訂閱 ↓	/cmd_vel_manual	Twist	外部 / 未知	manual_callback	geometry_msgs/Twist	操作員手動控制速度指令，優先權高於自動模式	14
-RecoveryArbiterNode	Topic	訂閱 ↓	/cmd_vel_manual	Twist	外部 / 未知	manual_callback	geometry_msgs/Twist	操作員手動控制速度指令，優先權高於自動模式	14
-RecoveryArbiterNode	Topic	訂閱 ↓	/system_status	String	外部 / 未知	diag_callback	"NORMAL" | "EMERGENCY" | "MANUAL"	系統運作模式，決定仲裁器輸出哪個速度來源	15
-RecoveryArbiterNode	Topic	訂閱 ↓	/system_status	String	外部 / 未知	diag_callback	"NORMAL" | "EMERGENCY" | "MANUAL"	系統運作模式，決定仲裁器輸出哪個速度來源	15
-◆  RobotPosePublisher									
-RobotPosePublisher	Topic	發布 ↑	/robot_pose_odom	Odometry			nav_msgs/Odometry（frame_id=map, child_frame_id=L_BASE_FOOTPRINT）	map frame 下的完整 Odometry，格式與 /odom 相同，twist 來自原始 /odom	41
-RobotPosePublisher	Topic	訂閱 ↓	/odom	Odometry	外部 / 未知	odom_callback	nav_msgs/Odometry	訂閱原始 odom 取得 twist（線速度 + 角速度），合併至 /robot_pose_odom	56
-◆  RouteExecutor									
-RouteExecutor	Topic	發布 ↑	/planned_route_path	String			{"poses": [{"x":..,"y":..,"z":..,"qx":..,"qy":..,"qz":..,"qw":..},...], "end_x": 4.5, "end_y": 2.1}	ComputeAndTrackRoute feedback 取得的 path，加上 end_node 座標後發給 LP 執行	59
-RouteExecutor	Topic	發布 ↑	/route_executor_state	String			"STATE_IDLE" | "STATE_NAVIGATING" | "STATE_WAITING_LP"	RE 內部狀態，供除錯與監控使用	57
-RouteExecutor	Topic	發布 ↑	/route_status	String			"DONE" | "FAIL"	所有路網段完成或達到 MAX_RETRY 失敗上限後回報，TA 據此切換至 IDLE	56
-RouteExecutor	Topic	訂閱 ↓	/lp_follow_status	String	LocalPlanner	lp_follow_status_callback	"DONE" | "FAIL"	監聽 LP 的 FollowPath 執行結果，決定推進下一段或重試	88
-RouteExecutor	Topic	訂閱 ↓	/route_mission	Int32MultiArray	GlobalPlanner	route_mission_callback	Int32MultiArray，節點 ID 序列，如 [3, 5, 6, 7]	GP 直接下達的路網任務，RE 拆分為逐段 [start, end] 執行	80
-RouteExecutor	Topic	訂閱 ↓	/route_mission_coords	String	GlobalPlanner	route_mission_coords_callback	{"3": {"x": 1.25, "y": 4.80, "station_type": "", "exit_strategy": ""}}	GP 發來的節點座標，RE 在發送 /planned_route_path 時帶入 end_node 座標	84
-RouteExecutor	Topic	訂閱 ↓	cmd_stop	Bool	外部 / 未知	cmd_stop_callback	std_msgs/Bool（True）	緊急停止，cancel ComputeAndTrackRoute，清空任務序列，重置 task_index	91
-RouteExecutor	Action	Client →	compute_and_track_route	ComputeAndTrackRoute	Nav2		nav2_msgs/action/ComputeAndTrackRoute（start_id, goal_id）	向 Nav2 請求計算路網段路徑，從 feedback 取得 path 後轉發給 LP，30s timeout 保護	66
-◆  TaskAgent									
-TaskAgent	Topic	發布 ↑	/local_backup_trigger	String			{"node_id": 3, "x": 1.25, "y": 4.80}	TA 收到退出節點結果後觸發 LP 倒車，帶入節點 ID 與座標	67
-TaskAgent	Topic	發布 ↑	/local_finetune	Twist			geometry_msgs/Twist（linear.x/y=位移m, angular.z=轉角度）	TA 將 /finetune_cmd 直接轉發給 LP，不做任何修改	64
-TaskAgent	Topic	發布 ↑	/navigation_display	String			"IDLE" | "MOVING" | "FAIL"	TA 狀態機對外顯示，供 UI 或監控節點訂閱	70
-TaskAgent	Topic	發布 ↑	/request_exit_node	String			{"station_id": 4}	docking 站出發時請 GP 計算後方退出節點，等待 /exit_node_result 回應	61
-TaskAgent	Topic	發布 ↑	/request_path	String			{"start": 3, "goal": 7}	請 GP 執行 BFS 算路，倒車完成後以 exit_node_id 為起點避免 race condition	58
-TaskAgent	Topic	訂閱 ↓	/base_status	String	LocalPlanner	base_status_callback	"DONE" | "FAIL" | "ALIGN_STRAIGHT" | "ALIGN_SPINNING" | ...	監聽 LP 精細動作狀態，WAITING_BACKUP 時收到 DONE 才觸發算路	93
-TaskAgent	Topic	訂閱 ↓	/current_station	String	GlobalPlanner	current_station_callback	{"id": 4, "station_type": "docking", "exit_strategy": "reverse"}	GP 廣播的當前站點，TA 用來判斷出發類型（docking 需倒車，一般站直接算路）	83
-TaskAgent	Topic	訂閱 ↓	/exit_node_result	String	GlobalPlanner	exit_node_result_callback	{"node_id": 3, "x": 1.25, "y": 4.80}	GP 計算退出節點結果，TA 記住 exit_node_id 作為後續算路起點	89
-TaskAgent	Topic	訂閱 ↓	/finetune_cmd	Twist	MissionBridgeNode	finetune_cmd_callback	geometry_msgs/Twist（linear.x/y=位移m, angular.z=轉角度）	Bridge 下發的微調指令，TA 收到後直接轉發給 LP	80
-TaskAgent	Topic	訂閱 ↓	/planned_path	Int32MultiArray	GlobalPlanner	planned_path_callback	Int32MultiArray，節點 ID 序列，如 [3, 5, 6, 7]	GP 算路完成通知，TA 收到後切換至 EXECUTING 狀態（GP 已直接發任務給 RE）	86
-TaskAgent	Topic	訂閱 ↓	/route_status	String	RouteExecutor	route_status_callback	"DONE" | "FAIL"	RE 路網導航結果，DONE 時 TA 切換至 IDLE，FAIL 時進入錯誤處理	97
-TaskAgent	Topic	訂閱 ↓	/target_station	String	MissionBridgeNode	target_station_callback	{"target_station": 7}	Bridge 下發目標站點，TA 僅在 IDLE 狀態接受，非 IDLE 時忽略	77`;
-
-        // 頁面載入完成後，自動填入預設資料並觸發解析
-        document.addEventListener('DOMContentLoaded', () => {
-            const textarea = document.getElementById('import-textarea');
-            if (textarea && textarea.value.trim() === '') {
-                textarea.value = DEFAULT_DATA;
-                // 利用 setTimeout 稍微延遲，確保 Mermaid 等依賴已準備就緒
-                setTimeout(() => {
-                    processImport();
-                }, 100);
-            }
-        });
     </script>
 </body>
 </html>
