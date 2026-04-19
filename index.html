@@ -5,22 +5,20 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ROS 節點關係圖產生器</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- 設定 Tailwind 自訂色系 -->
     <script>
         tailwind.config = {
             theme: {
                 extend: {
                     colors: {
-                        oak: '#D9C5B2',    // 淺橡木色
-                        ecru: '#F3EFE0',   // 生膠色
-                        cement: '#e0d3c5', // 自訂沙色背景 (原水泥灰替換)
+                        oak: '#D9C5B2',
+                        ecru: '#F3EFE0',
+                        cement: '#e0d3c5',
                     }
                 }
             }
         }
     </script>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@11.4.0/dist/mermaid.min.js"></script>
-    <!-- 引入 SheetJS 用於解析 Excel 檔案 -->
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <style>
         .mermaid-container {
@@ -32,39 +30,161 @@
             min-height: 400px;
             overflow: auto;
         }
-        .node-card:hover {
-            transform: translateY(-2px);
-            transition: all 0.2s;
-        }
-        /* 自訂滾動條，配合沙色與生膠色 */
+        .node-card:hover { transform: translateY(-2px); transition: all 0.2s; }
         ::-webkit-scrollbar { width: 8px; height: 8px; }
         ::-webkit-scrollbar-track { background: #e0d3c5; border-radius: 4px; }
         ::-webkit-scrollbar-thumb { background: #D9C5B2; border-radius: 4px; }
         ::-webkit-scrollbar-thumb:hover { background: #c2b09e; }
-        
-        /* Mermaid 節點與線段標籤滑鼠互動樣式 */
         .node { cursor: pointer !important; }
-        .edgeLabel { 
-            cursor: pointer !important; 
-            pointer-events: all !important; 
-        }
+        .edgeLabel { cursor: pointer !important; pointer-events: all !important; }
         .edgeLabel rect { transition: all 0.2s; }
-        .edgeLabel:hover rect {
-            fill: #F3EFE0 !important;
-            stroke: #D9C5B2 !important;
-            stroke-width: 1.5px !important;
+        .edgeLabel:hover rect { fill: #F3EFE0 !important; stroke: #D9C5B2 !important; stroke-width: 1.5px !important; }
+        .edgeLabel:hover span, .edgeLabel:hover div { color: #334155 !important; font-weight: 700 !important; }
+
+        /* Toast notification */
+        .toast {
+            position: fixed;
+            bottom: 2rem;
+            right: 2rem;
+            background: #1e293b;
+            color: white;
+            padding: 0.75rem 1.25rem;
+            border-radius: 0.75rem;
+            font-size: 0.875rem;
+            font-weight: 600;
+            z-index: 9999;
+            transform: translateY(100px);
+            opacity: 0;
+            transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+            pointer-events: none;
+            border-left: 4px solid #D9C5B2;
         }
-        .edgeLabel:hover span, .edgeLabel:hover div {
-            color: #334155 !important;
-            font-weight: 700 !important;
+        .toast.show {
+            transform: translateY(0);
+            opacity: 1;
         }
+
+        /* Stat cards animation */
+        @keyframes countUp {
+            from { opacity: 0; transform: translateY(8px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .stat-value { animation: countUp 0.4s ease forwards; }
+
+        /* Filter chip hover */
+        .filter-chip { transition: all 0.15s ease; }
+        .filter-chip:active { transform: scale(0.96); }
+
+        /* Graph direction button */
+        .dir-btn { transition: all 0.15s; }
+        .dir-btn.active { background: #1e293b; color: white; }
+        .dir-btn:not(.active) { background: white; color: #64748b; }
+
+        /* Smooth view switch */
+        .view-panel { transition: opacity 0.2s ease; }
+
+        /* Copy button flash */
+        @keyframes flash { 0%,100% { background: #D9C5B2; } 50% { background: #b5a090; } }
+        .copy-flash { animation: flash 0.4s ease; }
+
+        /* Highlight path */
+        .highlighted-edge path { stroke: #f59e0b !important; stroke-width: 3px !important; }
+        .highlighted-node rect { stroke: #f59e0b !important; stroke-width: 3px !important; }
+
+        /* Search highlight in table */
+        .search-highlight { background: #fef9c3; border-radius: 2px; }
+
+        /* ── 折疊側欄 ── */
+        #settings-sidebar {
+            position: fixed;
+            top: 0; right: 0;
+            height: 100vh;
+            width: 300px;
+            background: white;
+            box-shadow: -4px 0 24px rgba(0,0,0,0.10);
+            z-index: 200;
+            transform: translateX(100%);
+            transition: transform 0.32s cubic-bezier(0.4, 0, 0.2, 1);
+            display: flex;
+            flex-direction: column;
+            border-left: 4px solid #D9C5B2;
+        }
+        #settings-sidebar.open {
+            transform: translateX(0);
+        }
+        #sidebar-overlay {
+            position: fixed; inset: 0;
+            background: rgba(15,23,42,0.25);
+            backdrop-filter: blur(2px);
+            z-index: 199;
+            opacity: 0; pointer-events: none;
+            transition: opacity 0.3s ease;
+        }
+        #sidebar-overlay.show {
+            opacity: 1; pointer-events: all;
+        }
+        /* 側欄內的 section 折疊 */
+        .sb-section-body {
+            overflow: hidden;
+            transition: max-height 0.3s ease, opacity 0.3s ease;
+            max-height: 500px;
+            opacity: 1;
+        }
+        .sb-section-body.collapsed {
+            max-height: 0;
+            opacity: 0;
+        }
+        .sb-section-toggle svg {
+            transition: transform 0.25s ease;
+        }
+        .sb-section-toggle.collapsed svg {
+            transform: rotate(-90deg);
+        }
+        /* 選項按鈕群 */
+        .opt-btn {
+            display: flex; align-items: center; gap: 8px;
+            padding: 7px 12px;
+            border-radius: 8px;
+            font-size: 0.75rem; font-weight: 700;
+            cursor: pointer; border: 2px solid transparent;
+            transition: all 0.15s;
+            background: #f1ece5; color: #475569;
+            width: 100%;
+            text-align: left;
+        }
+        .opt-btn:hover { border-color: #D9C5B2; background: #F3EFE0; color: #1e293b; }
+        .opt-btn.active { background: #1e293b; color: white; border-color: #1e293b; }
+        /* 滑桿 */
+        .sb-slider { -webkit-appearance: none; appearance: none; width: 100%; height: 6px; border-radius: 3px; background: #e0d3c5; outline: none; }
+        .sb-slider::-webkit-slider-thumb { -webkit-appearance: none; width: 18px; height: 18px; border-radius: 50%; background: #D9C5B2; border: 2px solid #1e293b; cursor: pointer; transition: background 0.15s; }
+        .sb-slider::-webkit-slider-thumb:hover { background: #c2b09e; }
+        /* 設定按鈕 */
+        #btn-settings {
+            position: fixed;
+            right: 1.25rem; bottom: 1.5rem;
+            z-index: 198;
+            background: #1e293b;
+            color: white;
+            border-radius: 50%;
+            width: 52px; height: 52px;
+            display: flex; align-items: center; justify-content: center;
+            box-shadow: 0 4px 16px rgba(0,0,0,0.18);
+            cursor: pointer;
+            transition: all 0.2s;
+            border: 3px solid #D9C5B2;
+        }
+        #btn-settings:hover { transform: scale(1.08) rotate(20deg); background: #334155; }
+        #btn-settings.open { transform: rotate(45deg); background: #D9C5B2; color: #1e293b; }
     </style>
 </head>
 <body class="bg-cement text-slate-800 min-h-screen flex flex-col">
 
+    <!-- Toast -->
+    <div id="toast" class="toast"></div>
+
     <!-- 頂部導航列 -->
     <nav class="bg-white border-b-4 border-oak p-4 shadow-sm sticky top-0 z-50">
-        <div class="max-w-7xl mx-auto flex justify-between items-center">
+        <div class="max-w-7xl mx-auto flex justify-between items-center gap-4 flex-wrap">
             <div class="flex items-center gap-3">
                 <div class="bg-oak p-2 rounded-lg text-slate-900 shadow-sm">
                     <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -77,12 +197,12 @@
                     <p class="text-[10px] text-slate-400 mt-0.5 font-medium">KanMingKai / ros-topology-visualizer</p>
                 </div>
             </div>
-            <div class="flex gap-4 text-sm items-center flex-wrap">
+            <div class="flex gap-2 text-sm items-center flex-wrap">
                 <button id="btn-import" onclick="openImportModal()" class="bg-oak hover:opacity-80 text-slate-900 px-4 py-2 rounded-full font-bold transition-all shadow-sm flex items-center gap-2">
                     <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
                     </svg>
-                    匯入更新圖表
+                    匯入資料
                 </button>
                 
                 <button id="btn-export" onclick="exportStandaloneHTML()" class="bg-slate-700 hover:bg-slate-800 text-white px-4 py-2 rounded-full font-bold transition-all shadow-sm flex items-center gap-2">
@@ -92,17 +212,37 @@
                     匯出 HTML
                 </button>
 
-                <div id="nav-separator" class="w-px h-6 bg-slate-300 mx-2 hidden md:block opacity-50"></div>
-                <button onclick="switchView('graph')" id="btn-graph" class="bg-slate-800 text-white px-4 py-2 rounded-full font-bold transition-all shadow-md">拓撲圖視圖</button>
-                <button onclick="switchView('table')" id="btn-table" class="bg-white text-slate-600 border border-slate-300 px-4 py-2 rounded-full font-bold transition-all hover:bg-slate-50">原始資料表</button>
+                <div class="w-px h-6 bg-slate-300 mx-1 hidden md:block opacity-50"></div>
+                <button onclick="switchView('graph')" id="btn-graph" class="bg-slate-800 text-white px-4 py-2 rounded-full font-bold transition-all shadow-md">拓撲圖</button>
+                <button onclick="switchView('table')" id="btn-table" class="bg-white text-slate-600 border border-slate-300 px-4 py-2 rounded-full font-bold transition-all hover:bg-slate-50">資料表</button>
             </div>
         </div>
     </nav>
 
     <main class="max-w-7xl mx-auto p-6 flex-1 w-full">
         
+        <!-- 統計面板 -->
+        <div id="stats-panel" class="hidden grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+            <div class="bg-white rounded-2xl p-4 border border-slate-100 shadow-sm text-center">
+                <div class="text-2xl font-bold text-slate-800 stat-value" id="stat-nodes">—</div>
+                <div class="text-xs text-slate-500 font-bold mt-1">核心節點</div>
+            </div>
+            <div class="bg-white rounded-2xl p-4 border border-slate-100 shadow-sm text-center">
+                <div class="text-2xl font-bold text-slate-800 stat-value" id="stat-topics">—</div>
+                <div class="text-xs text-slate-500 font-bold mt-1">唯一 Topics</div>
+            </div>
+            <div class="bg-white rounded-2xl p-4 border border-slate-100 shadow-sm text-center">
+                <div class="text-2xl font-bold text-slate-800 stat-value" id="stat-pubs">—</div>
+                <div class="text-xs text-slate-500 font-bold mt-1">發布關係</div>
+            </div>
+            <div class="bg-white rounded-2xl p-4 border border-slate-100 shadow-sm text-center">
+                <div class="text-2xl font-bold text-slate-800 stat-value" id="stat-subs">—</div>
+                <div class="text-xs text-slate-500 font-bold mt-1">訂閱關係</div>
+            </div>
+        </div>
+
         <!-- 拓撲圖區域 -->
-        <div id="graph-view" class="space-y-6">
+        <div id="graph-view" class="space-y-6 view-panel">
             
             <!-- 節點過濾控制區 -->
             <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-100">
@@ -111,10 +251,11 @@
                         <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-oak" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
                         </svg>
-                        節點顯示過濾 <span class="text-xs font-normal text-slate-400">(只選擇單一節點時，將自動顯示其所有關聯節點)</span>
+                        節點顯示過濾
+                        <span class="text-xs font-normal text-slate-400">(單選時自動帶入所有關聯節點)</span>
                     </h3>
                     <div class="flex gap-3">
-                        <button onclick="toggleAllFilters(true)" class="text-xs font-bold text-oak hover:text-slate-900 transition-colors">全選 (全開)</button>
+                        <button onclick="toggleAllFilters(true)" class="text-xs font-bold text-oak hover:text-slate-900 transition-colors">全選</button>
                         <span class="text-cement">|</span>
                         <button onclick="toggleAllFilters(false)" class="text-xs font-bold text-slate-400 hover:text-slate-900 transition-colors">全不選</button>
                     </div>
@@ -122,64 +263,91 @@
                 <div id="node-filters" class="flex flex-wrap gap-2">
                     <span class="text-xs text-cement italic">請先匯入資料...</span>
                 </div>
-            </div>
 
-            <!-- 圖表主體區塊 -->
-            <div class="bg-white p-6 rounded-2xl shadow-md border border-slate-100">
-                <h2 class="text-lg font-bold mb-4 flex items-center gap-2 text-slate-800">
-                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-oak" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
-                    </svg>
-                    系統節點關係圖
-                    <span class="text-xs font-normal text-slate-400 ml-2">(提示：點擊圖表中的<strong class="text-oak">節點</strong>或<strong class="text-oak">線段標籤</strong>可查看詳細說明)</span>
-                </h2>
-                <div class="border border-ecru rounded-xl bg-white p-4 mermaid-container shadow-inner" id="mermaid-render-area">
-                    <div class="text-slate-400 mt-10">請點擊上方「匯入更新圖表」載入資料...</div>
+                <!-- Topic 查詢 -->
+                <div class="flex flex-col md:flex-row md:items-center justify-between gap-3 pt-4 border-t border-oak/30 mt-4">
+                    <h3 class="text-sm font-bold text-slate-700 flex items-center gap-2 shrink-0">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-oak" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                        </svg>
+                        指定 Topic 查詢
+                    </h3>
+                    <div class="flex-1 flex gap-2 w-full md:max-w-md">
+                        <input type="text" id="topic-search-input" list="topic-list" placeholder="輸入或選擇 Topic 名稱..." class="flex-1 px-3 py-1.5 text-sm font-mono border-2 border-cement rounded-lg bg-white focus:outline-none focus:border-oak focus:ring-1 focus:ring-oak transition-colors text-slate-700">
+                        <datalist id="topic-list"></datalist>
+                        <button onclick="searchTopic()" class="bg-oak text-slate-900 px-4 py-1.5 rounded-lg text-sm font-bold hover:opacity-80 transition-opacity shadow-sm shrink-0">查詢關聯</button>
+                    </div>
                 </div>
             </div>
 
-            <!-- 動態節點詳細資訊卡片 -->
-            <div id="node-cards-container" class="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <!-- 卡片將會動態生成於此 -->
+            <!-- 圖表主體 -->
+            <div class="bg-white p-6 rounded-2xl shadow-md border border-slate-100">
+                <div class="flex items-center justify-between mb-4">
+                    <h2 class="text-lg font-bold flex items-center gap-2 text-slate-800">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-oak" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
+                        </svg>
+                        系統節點關係圖
+                        <span class="text-xs font-normal text-slate-400 ml-2">點擊<strong class="text-oak">節點</strong>或<strong class="text-oak">連線標籤</strong>查看詳細說明</span>
+                    </h2>
+                    <!-- Render indicator -->
+                    <div id="render-badge" class="hidden items-center gap-1.5 text-xs text-slate-500 bg-cement/50 px-3 py-1 rounded-full font-bold">
+                        <div class="w-1.5 h-1.5 rounded-full bg-green-500"></div>
+                        <span id="render-badge-text">已渲染</span>
+                    </div>
+                </div>
+                <div class="border border-ecru rounded-xl bg-white p-4 mermaid-container shadow-inner" id="mermaid-render-area">
+                    <div class="text-slate-400 mt-10">請點擊上方「匯入資料」載入資料...</div>
+                </div>
             </div>
+
+            <!-- 節點卡片 -->
+            <div id="node-cards-container" class="grid grid-cols-1 md:grid-cols-3 gap-6"></div>
         </div>
 
-        <!-- 表格視圖區域 -->
-        <div id="table-view" class="hidden animate-in fade-in duration-500">
+        <!-- 表格視圖 -->
+        <div id="table-view" class="hidden view-panel">
+            <!-- 全文搜尋 -->
+            <div class="bg-white rounded-2xl p-4 mb-4 border border-slate-100 shadow-sm flex gap-3 items-center">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-slate-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                </svg>
+                <input type="text" id="table-search" placeholder="搜尋節點、Topic、說明文字..." class="flex-1 text-sm outline-none bg-transparent text-slate-700 placeholder-slate-400 font-medium" oninput="filterTable()">
+                <span id="table-match-count" class="text-xs text-slate-400 font-bold shrink-0 hidden"></span>
+                <button onclick="document.getElementById('table-search').value=''; filterTable();" class="text-xs text-slate-400 hover:text-slate-700 font-bold transition-colors hidden" id="clear-search-btn">✕ 清除</button>
+            </div>
             <div class="bg-white rounded-2xl shadow-md border border-slate-100 overflow-hidden">
                 <div class="overflow-x-auto">
                     <table class="w-full text-left text-sm whitespace-nowrap">
                         <thead class="bg-ecru border-b border-oak/30 text-slate-600 uppercase text-xs">
                             <tr>
-                                <th class="px-6 py-4 font-bold">節點 (Node)</th>
-                                <th class="px-6 py-4 font-bold">類型 / 方向</th>
-                                <th class="px-6 py-4 font-bold">名稱 (Topic/Action)</th>
-                                <th class="px-6 py-4 font-bold">型別 (Type)</th>
+                                <th class="px-6 py-4 font-bold cursor-pointer hover:text-slate-900 select-none" onclick="sortTable('node')">節點 <span class="sort-indicator" data-col="node">↕</span></th>
+                                <th class="px-6 py-4 font-bold cursor-pointer hover:text-slate-900 select-none" onclick="sortTable('type')">類型 / 方向 <span class="sort-indicator" data-col="type">↕</span></th>
+                                <th class="px-6 py-4 font-bold cursor-pointer hover:text-slate-900 select-none" onclick="sortTable('topic')">Topic 名稱 <span class="sort-indicator" data-col="topic">↕</span></th>
+                                <th class="px-6 py-4 font-bold">訊息型別</th>
                                 <th class="px-6 py-4 font-bold max-w-xs">說明</th>
                             </tr>
                         </thead>
                         <tbody id="data-table-body" class="divide-y divide-slate-100">
                             <tr>
-                                <td colspan="5" class="px-6 py-8 text-center text-slate-400">尚無資料，請點擊上方「匯入更新圖表」</td>
+                                <td colspan="5" class="px-6 py-8 text-center text-slate-400">尚無資料，請點擊上方「匯入資料」</td>
                             </tr>
                         </tbody>
                     </table>
                 </div>
             </div>
         </div>
-
     </main>
 
-    <!-- 加入個人資訊的頁尾 -->
     <footer class="mt-auto py-6 pb-8 text-center">
-        <p class="text-sm font-bold text-slate-700/80"> 
+        <p class="text-sm font-bold text-slate-700/80">
             <a href="https://github.com/KanMingKai/ros-topology-visualizer" target="_blank" class="hover:text-slate-900 underline decoration-slate-400 underline-offset-4 transition-colors">
                 KanMingKai / ros-topology-visualizer
             </a>
         </p>
     </footer>
 
-    <!-- 匯入資料 Modal -->
+    <!-- 匯入 Modal -->
     <div id="import-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm hidden z-[100] flex items-center justify-center opacity-0 transition-opacity duration-300">
         <div class="bg-white w-full max-w-5xl rounded-2xl shadow-2xl p-6 transform scale-95 transition-transform duration-300 border-t-8 border-oak" id="import-modal-content">
             <div class="flex justify-between items-center mb-4">
@@ -195,20 +363,17 @@
                     </svg>
                 </button>
             </div>
-            
             <div class="flex flex-col md:flex-row md:items-center justify-between mb-3 gap-3">
                 <p class="text-sm text-slate-500 font-medium">請貼上表格文字（支援從 Excel 複製），或直接上傳檔案：</p>
-                <label class="cursor-pointer px-4 py-2 bg-ecru text-slate-700 hover:bg-oak hover:text-slate-900 border border-oak rounded-lg text-sm font-bold flex items-center gap-2 transition-colors shrink-0 shadow-sm relative overflow-hidden">
+                <label class="cursor-pointer px-4 py-2 bg-ecru text-slate-700 hover:bg-oak hover:text-slate-900 border border-oak rounded-lg text-sm font-bold flex items-center gap-2 transition-colors shrink-0 shadow-sm">
                     <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
                     </svg>
-                    <span id="upload-btn-text">上傳 CSV / Excel 檔案 (讀取第一分頁)</span>
-                    <input type="file" id="file-upload" accept=".csv, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, application/vnd.ms-excel" class="hidden" onchange="handleFileUpload(event)">
+                    <span id="upload-btn-text">上傳 CSV / Excel 檔案</span>
+                    <input type="file" id="file-upload" accept=".csv,.xlsx,.xls" class="hidden" onchange="handleFileUpload(event)">
                 </label>
             </div>
-            
             <textarea id="import-textarea" class="w-full h-80 border border-slate-300 rounded-xl p-4 text-xs font-mono bg-ecru/30 focus:ring-2 focus:ring-oak focus:border-oak outline-none resize-none text-slate-700" placeholder="可直接貼上，或使用上方按鈕上傳..."></textarea>
-            
             <div class="flex justify-end gap-3 mt-6">
                 <button onclick="closeImportModal()" class="px-5 py-2 rounded-lg text-slate-500 hover:bg-ecru hover:text-slate-700 font-bold transition-colors">取消</button>
                 <button onclick="processImport()" class="px-5 py-2 rounded-lg bg-oak hover:opacity-80 text-slate-900 font-bold transition-colors shadow-md flex items-center gap-2">
@@ -218,7 +383,7 @@
         </div>
     </div>
 
-    <!-- 節點詳細資訊 Modal -->
+    <!-- 節點詳細 Modal -->
     <div id="node-detail-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm hidden z-[100] flex items-center justify-center opacity-0 transition-opacity duration-300">
         <div class="bg-white w-full max-w-4xl max-h-[85vh] flex flex-col rounded-2xl shadow-2xl transform scale-95 transition-transform duration-300 border-t-8 border-cement" id="node-detail-modal-content">
             <div class="p-6 border-b border-oak/20 flex justify-between items-center bg-cement rounded-t-lg">
@@ -244,7 +409,7 @@
         </div>
     </div>
 
-    <!-- 標籤(Topic)詳細資訊 Modal -->
+    <!-- Topic 詳細 Modal -->
     <div id="topic-detail-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm hidden z-[100] flex items-center justify-center opacity-0 transition-opacity duration-300">
         <div class="bg-white w-full max-w-4xl max-h-[85vh] flex flex-col rounded-2xl shadow-2xl transform scale-95 transition-transform duration-300 border-t-8 border-oak" id="topic-detail-modal-content">
             <div class="p-6 border-b border-oak/20 flex justify-between items-center bg-cement rounded-t-lg">
@@ -271,8 +436,178 @@
         </div>
     </div>
 
+    <!-- 側欄遮罩 -->
+    <div id="sidebar-overlay" onclick="closeSidebar()"></div>
+
+    <!-- 浮動設定按鈕 -->
+    <button id="btn-settings" onclick="toggleSidebar()" title="圖表設定">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+        </svg>
+    </button>
+
+    <!-- 折疊式設定側欄 -->
+    <div id="settings-sidebar">
+        <!-- 側欄 Header -->
+        <div class="flex items-center justify-between px-5 py-4 border-b border-oak/30 bg-ecru shrink-0">
+            <div class="flex items-center gap-2">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-slate-700" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
+                <span class="font-bold text-slate-800 text-sm">圖表設定</span>
+            </div>
+            <button onclick="closeSidebar()" class="text-slate-400 hover:text-slate-700 p-1 rounded-full hover:bg-oak/30 transition-colors">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+            </button>
+        </div>
+
+        <!-- 側欄內容，可滾動 -->
+        <div class="flex-1 overflow-y-auto p-4 space-y-3">
+
+            <!-- Section 1: 流向方向 -->
+            <div class="bg-ecru/60 rounded-xl border border-oak/20 overflow-hidden">
+                <button class="sb-section-toggle w-full flex items-center justify-between px-4 py-3 text-left hover:bg-oak/20 transition-colors" onclick="toggleSbSection(this)">
+                    <span class="text-xs font-bold text-slate-700 uppercase tracking-wider">流向方向</span>
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M19 9l-7 7-7-7" /></svg>
+                </button>
+                <div class="sb-section-body px-4 pb-4 space-y-1.5">
+                    <button class="opt-btn active" id="sb-dir-LR" onclick="setSbDirection('LR')">
+                        <span class="text-base leading-none">→</span> LR — 由左至右
+                    </button>
+                    <button class="opt-btn" id="sb-dir-RL" onclick="setSbDirection('RL')">
+                        <span class="text-base leading-none">←</span> RL — 由右至左
+                    </button>
+                    <button class="opt-btn" id="sb-dir-TB" onclick="setSbDirection('TB')">
+                        <span class="text-base leading-none">↓</span> TB — 由上至下
+                    </button>
+                    <button class="opt-btn" id="sb-dir-BT" onclick="setSbDirection('BT')">
+                        <span class="text-base leading-none">↑</span> BT — 由下至上
+                    </button>
+                </div>
+            </div>
+
+            <!-- Section 2: 曲線樣式 -->
+            <div class="bg-ecru/60 rounded-xl border border-oak/20 overflow-hidden">
+                <button class="sb-section-toggle w-full flex items-center justify-between px-4 py-3 text-left hover:bg-oak/20 transition-colors" onclick="toggleSbSection(this)">
+                    <span class="text-xs font-bold text-slate-700 uppercase tracking-wider">曲線樣式</span>
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M19 9l-7 7-7-7" /></svg>
+                </button>
+                <div class="sb-section-body px-4 pb-4 space-y-1.5">
+                    <button class="opt-btn active" id="sb-curve-step" onclick="setSbCurve('step')">
+                        <svg class="w-4 h-4 shrink-0" viewBox="0 0 24 8" fill="none" stroke="currentColor" stroke-width="2"><polyline points="0,7 6,7 6,1 18,1 18,7 24,7"/></svg>
+                        step — 直角折線
+                    </button>
+                    <button class="opt-btn" id="sb-curve-basis" onclick="setSbCurve('basis')">
+                        <svg class="w-4 h-4 shrink-0" viewBox="0 0 24 8" fill="none" stroke="currentColor" stroke-width="2"><path d="M0,7 C6,7 6,1 12,1 C18,1 18,7 24,7"/></svg>
+                        basis — 平滑貝茲
+                    </button>
+                    <button class="opt-btn" id="sb-curve-linear" onclick="setSbCurve('linear')">
+                        <svg class="w-4 h-4 shrink-0" viewBox="0 0 24 8" fill="none" stroke="currentColor" stroke-width="2"><line x1="0" y1="7" x2="24" y2="1"/></svg>
+                        linear — 直線
+                    </button>
+                    <button class="opt-btn" id="sb-curve-monotoneX" onclick="setSbCurve('monotoneX')">
+                        <svg class="w-4 h-4 shrink-0" viewBox="0 0 24 8" fill="none" stroke="currentColor" stroke-width="2"><path d="M0,7 C4,7 8,1 12,1 C16,1 20,1 24,1"/></svg>
+                        monotoneX — 單調曲線
+                    </button>
+                    <button class="opt-btn" id="sb-curve-cardinal" onclick="setSbCurve('cardinal')">
+                        <svg class="w-4 h-4 shrink-0" viewBox="0 0 24 8" fill="none" stroke="currentColor" stroke-width="2"><path d="M0,7 C2,7 4,-1 12,4 C20,9 22,1 24,1"/></svg>
+                        cardinal — 彈性曲線
+                    </button>
+                </div>
+            </div>
+
+            <!-- Section 4: 節點形狀 -->
+            <div class="bg-ecru/60 rounded-xl border border-oak/20 overflow-hidden">
+                <button class="sb-section-toggle w-full flex items-center justify-between px-4 py-3 text-left hover:bg-oak/20 transition-colors" onclick="toggleSbSection(this)">
+                    <span class="text-xs font-bold text-slate-700 uppercase tracking-wider">節點形狀</span>
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M19 9l-7 7-7-7" /></svg>
+                </button>
+                <div class="sb-section-body px-4 pb-4 space-y-1.5">
+                    <button class="opt-btn active" id="sb-shape-rect" onclick="setSbNodeShape('rect')">
+                        <svg class="w-5 h-4 shrink-0" viewBox="0 0 20 14" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="1" y="1" width="18" height="12" rx="1"/></svg>
+                        矩形（預設）
+                    </button>
+                    <button class="opt-btn" id="sb-shape-rounded" onclick="setSbNodeShape('rounded')">
+                        <svg class="w-5 h-4 shrink-0" viewBox="0 0 20 14" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="1" y="1" width="18" height="12" rx="6"/></svg>
+                        圓角矩形
+                    </button>
+                    <button class="opt-btn" id="sb-shape-stadium" onclick="setSbNodeShape('stadium')">
+                        <svg class="w-5 h-4 shrink-0" viewBox="0 0 20 14" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="1" y="2" width="18" height="10" rx="5"/></svg>
+                        跑道形
+                    </button>
+                    <button class="opt-btn" id="sb-shape-hexagon" onclick="setSbNodeShape('hexagon')">
+                        <svg class="w-5 h-5 shrink-0" viewBox="0 0 20 18" fill="none" stroke="currentColor" stroke-width="1.8"><polygon points="10,1 19,5.5 19,12.5 10,17 1,12.5 1,5.5"/></svg>
+                        六角形
+                    </button>
+                </div>
+            </div>
+
+            <!-- Section 5: 間距調整 -->
+            <div class="bg-ecru/60 rounded-xl border border-oak/20 overflow-hidden">
+                <button class="sb-section-toggle w-full flex items-center justify-between px-4 py-3 text-left hover:bg-oak/20 transition-colors" onclick="toggleSbSection(this)">
+                    <span class="text-xs font-bold text-slate-700 uppercase tracking-wider">間距調整</span>
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M19 9l-7 7-7-7" /></svg>
+                </button>
+                <div class="sb-section-body px-4 pb-4 space-y-4">
+                    <div>
+                        <div class="flex justify-between mb-2">
+                            <label class="text-xs font-bold text-slate-600">層間距 (rankSpacing)</label>
+                            <span class="text-xs font-mono font-bold text-slate-800" id="val-rank">80</span>
+                        </div>
+                        <input type="range" class="sb-slider" min="40" max="200" value="80" id="sl-rank"
+                            oninput="document.getElementById('val-rank').textContent=this.value; debouncedApplySettings()">
+                    </div>
+                    <div>
+                        <div class="flex justify-between mb-2">
+                            <label class="text-xs font-bold text-slate-600">節點間距 (nodeSpacing)</label>
+                            <span class="text-xs font-mono font-bold text-slate-800" id="val-node">20</span>
+                        </div>
+                        <input type="range" class="sb-slider" min="8" max="100" value="20" id="sl-node"
+                            oninput="document.getElementById('val-node').textContent=this.value; debouncedApplySettings()">
+                    </div>
+                    <div>
+                        <div class="flex justify-between mb-2">
+                            <label class="text-xs font-bold text-slate-600">節點內距 (padding)</label>
+                            <span class="text-xs font-mono font-bold text-slate-800" id="val-pad">15</span>
+                        </div>
+                        <input type="range" class="sb-slider" min="4" max="40" value="15" id="sl-pad"
+                            oninput="document.getElementById('val-pad').textContent=this.value; debouncedApplySettings()">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Section 6: 佈局演算法 -->
+            <div class="bg-ecru/60 rounded-xl border border-oak/20 overflow-hidden">
+                <button class="sb-section-toggle w-full flex items-center justify-between px-4 py-3 text-left hover:bg-oak/20 transition-colors" onclick="toggleSbSection(this)">
+                    <span class="text-xs font-bold text-slate-700 uppercase tracking-wider">佈局演算法</span>
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M19 9l-7 7-7-7" /></svg>
+                </button>
+                <div class="sb-section-body px-4 pb-4 space-y-1.5">
+                    <button class="opt-btn active" id="sb-layout-dagre" onclick="setSbLayout('dagre')">
+                        dagre — 標準層次（預設）
+                    </button>
+                    <button class="opt-btn" id="sb-layout-elk" onclick="setSbLayout('elk')">
+                        elk — 進階層次（較整齊）
+                    </button>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- 側欄 Footer: 重置按鈕 -->
+        <div class="px-4 py-3 border-t border-oak/30 bg-ecru/40 shrink-0">
+            <button onclick="resetSettings()" class="w-full text-xs font-bold text-slate-500 hover:text-slate-800 bg-white border border-oak/30 hover:border-oak rounded-lg py-2 transition-colors">
+                ↺ 重置為預設值
+            </button>
+        </div>
+    </div>
+
     <script>
-        // 初始化設定
+        // ─── 初始化 ────────────────────────────────────────────────
         mermaid.initialize({ 
             startOnLoad: false,
             theme: 'neutral',
@@ -281,24 +616,146 @@
         });
 
         let parsedData = [];
-        window.nodeIdMap = {}; 
-        
-        // 過濾器狀態管理
+        window.nodeIdMap = {};
         window.allCoreNodes = new Set();
         window.activeCoreNodes = new Set();
+        window.currentGraphDirection = 'LR';
+        window.currentMermaidSource = '';
+        window.renderDebounceTimer = null;
+        window.tableSortState = { col: null, asc: true };
+        window.tableFilteredData = [];
 
-        // CSV 解析工具
+        // ─── 側欄設定狀態 ──────────────────────────────────────────
+        window.sbSettings = {
+            direction: 'LR',
+            curve: 'step',
+            edgeStyle: 'solid',
+            nodeShape: 'rect',
+            rankSpacing: 80,
+            nodeSpacing: 20,
+            padding: 15,
+            layout: 'dagre'
+        };
+
+        // ─── Toast 通知 ─────────────────────────────────────────────
+        function showToast(msg, duration = 2200) {
+            const t = document.getElementById('toast');
+            t.textContent = msg;
+            t.classList.add('show');
+            setTimeout(() => t.classList.remove('show'), duration);
+        }
+
+        // ─── 側欄開關 ────────────────────────────────────────────────
+        function toggleSidebar() {
+            const sb = document.getElementById('settings-sidebar');
+            const ov = document.getElementById('sidebar-overlay');
+            const btn = document.getElementById('btn-settings');
+            const isOpen = sb.classList.contains('open');
+            if (isOpen) { closeSidebar(); }
+            else {
+                sb.classList.add('open');
+                ov.classList.add('show');
+                btn.classList.add('open');
+            }
+        }
+        function closeSidebar() {
+            document.getElementById('settings-sidebar').classList.remove('open');
+            document.getElementById('sidebar-overlay').classList.remove('show');
+            document.getElementById('btn-settings').classList.remove('open');
+        }
+
+        // ─── 側欄 section 折疊 ──────────────────────────────────────
+        function toggleSbSection(btn) {
+            const body = btn.nextElementSibling;
+            const isCollapsed = body.classList.contains('collapsed');
+            body.classList.toggle('collapsed', !isCollapsed);
+            btn.classList.toggle('collapsed', !isCollapsed);
+        }
+
+        // ─── 側欄選項組（互斥）通用更新 ─────────────────────────────
+        function setSbOptActive(prefix, val) {
+            document.querySelectorAll(`[id^="${prefix}"]`).forEach(b => b.classList.remove('active'));
+            const target = document.getElementById(`${prefix}${val}`);
+            if (target) target.classList.add('active');
+        }
+
+        // ─── 方向 ────────────────────────────────────────────────────
+        function setSbDirection(dir) {
+            window.sbSettings.direction = dir;
+            window.currentGraphDirection = dir;
+            setSbOptActive('sb-dir-', dir);
+            scheduleRender();
+        }
+
+        // ─── 曲線 ────────────────────────────────────────────────────
+        function setSbCurve(curve) {
+            window.sbSettings.curve = curve;
+            setSbOptActive('sb-curve-', curve);
+            scheduleRender();
+        }
+
+        // ─── 連線樣式 ────────────────────────────────────────────────
+        function setSbEdgeStyle(style) {
+            window.sbSettings.edgeStyle = style;
+            setSbOptActive('sb-edge-', style);
+            scheduleRender();
+        }
+
+        // ─── 節點形狀 ────────────────────────────────────────────────
+        function setSbNodeShape(shape) {
+            window.sbSettings.nodeShape = shape;
+            setSbOptActive('sb-shape-', shape);
+            scheduleRender();
+        }
+
+        // ─── 佈局演算法 ──────────────────────────────────────────────
+        function setSbLayout(layout) {
+            window.sbSettings.layout = layout;
+            setSbOptActive('sb-layout-', layout);
+            scheduleRender();
+        }
+
+        // ─── 間距滑桿（debounced） ───────────────────────────────────
+        function debouncedApplySettings() {
+            window.sbSettings.rankSpacing = parseInt(document.getElementById('sl-rank').value);
+            window.sbSettings.nodeSpacing = parseInt(document.getElementById('sl-node').value);
+            window.sbSettings.padding = parseInt(document.getElementById('sl-pad').value);
+            scheduleRender();
+        }
+
+        // ─── 重置設定 ────────────────────────────────────────────────
+        function resetSettings() {
+            window.sbSettings = { direction:'LR', curve:'step', edgeStyle:'solid', nodeShape:'rect', rankSpacing:80, nodeSpacing:20, padding:15, layout:'dagre' };
+            window.currentGraphDirection = 'LR';
+            setSbOptActive('sb-dir-', 'LR');
+            setSbOptActive('sb-curve-', 'step');
+            setSbOptActive('sb-edge-', 'solid');
+            setSbOptActive('sb-shape-', 'rect');
+            setSbOptActive('sb-layout-', 'dagre');
+            document.getElementById('sl-rank').value = 80; document.getElementById('val-rank').textContent = '80';
+            document.getElementById('sl-node').value = 20; document.getElementById('val-node').textContent = '20';
+            document.getElementById('sl-pad').value = 15;  document.getElementById('val-pad').textContent = '15';
+            scheduleRender();
+            showToast('↺ 已重置為預設值');
+        }
+
+        // ─── Debounced render ────────────────────────────────────────
+        function scheduleRender() {
+            clearTimeout(window.renderDebounceTimer);
+            window.renderDebounceTimer = setTimeout(() => {
+                updateMermaidGraph();
+            }, 120);
+        }
+
+        // ─── CSV 解析 ────────────────────────────────────────────────
         function parseCSVLine(text) {
-            let ret = [];
-            let cur = '';
-            let inQuote = false;
+            let ret = [], cur = '', inQuote = false;
             for (let i = 0; i < text.length; i++) {
                 let char = text[i];
                 if (inQuote) {
                     if (char === '"') {
-                        if (i + 1 < text.length && text[i + 1] === '"') {
-                            cur += '"'; i++; 
-                        } else { inQuote = false; }
+                        if (i + 1 < text.length && text[i + 1] === '"') { cur += '"'; i++; }
+                        else { inQuote = false; }
                     } else { cur += char; }
                 } else {
                     if (char === '"') { inQuote = true; }
@@ -313,198 +770,203 @@
         function handleFileUpload(event) {
             const file = event.target.files[0];
             if (!file) return;
-            
             const fileName = file.name.toLowerCase();
             const btnText = document.getElementById('upload-btn-text');
-            const originalText = btnText.innerText;
             btnText.innerText = '讀取中...';
-            
             const reader = new FileReader();
-
             if (fileName.endsWith('.xlsx') || fileName.endsWith('.xls')) {
                 reader.onload = function(e) {
                     try {
                         const data = new Uint8Array(e.target.result);
                         const workbook = XLSX.read(data, {type: 'array'});
-                        const firstSheetName = workbook.SheetNames[0];
-                        const worksheet = workbook.Sheets[firstSheetName];
-                        const csvString = XLSX.utils.sheet_to_csv(worksheet);
-                        
-                        document.getElementById('import-textarea').value = csvString;
-                        btnText.innerText = originalText;
-                        processImport(); 
+                        const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+                        document.getElementById('import-textarea').value = XLSX.utils.sheet_to_csv(worksheet);
+                        btnText.innerText = '上傳 CSV / Excel 檔案';
+                        processImport();
                     } catch (err) {
-                        alert("讀取 Excel 失敗，請確認檔案格式是否正確。\n錯誤訊息: " + err.message);
-                        btnText.innerText = originalText;
+                        alert("讀取 Excel 失敗：" + err.message);
+                        btnText.innerText = '上傳 CSV / Excel 檔案';
                     }
                 };
                 reader.readAsArrayBuffer(file);
-            } 
-            else if (fileName.endsWith('.csv')) {
+            } else if (fileName.endsWith('.csv')) {
                 reader.onload = function(e) {
                     document.getElementById('import-textarea').value = e.target.result;
-                    btnText.innerText = originalText;
-                    processImport(); 
+                    btnText.innerText = '上傳 CSV / Excel 檔案';
+                    processImport();
                 };
                 reader.readAsText(file, 'UTF-8');
             } else {
-                alert("不支援的檔案格式，請上傳 CSV 或 Excel 檔案 (.xlsx, .xls)。");
-                btnText.innerText = originalText;
+                alert("不支援的格式，請上傳 CSV 或 Excel。");
+                btnText.innerText = '上傳 CSV / Excel 檔案';
             }
-            
-            event.target.value = ''; 
+            event.target.value = '';
         }
 
+        // ─── 資料解析 ────────────────────────────────────────────────
         function processImport() {
             const rawText = document.getElementById('import-textarea').value;
-            if (!rawText.trim()) { alert("請先貼上資料或上傳 CSV/Excel 檔案！"); return; }
+            if (!rawText.trim()) { alert("請先貼上資料或上傳 CSV/Excel！"); return; }
 
             const lines = rawText.trim().split('\n');
             parsedData = [];
             window.allCoreNodes = new Set();
-
             const isCSV = lines[0].includes(',') && !lines[0].includes('\t');
 
             lines.forEach(line => {
                 line = line.trim();
                 if (!line || line.startsWith('節點') || line.startsWith('◆') || line.startsWith('Topic 名稱')) return;
-                
-                let parts;
-                if (isCSV) {
-                    parts = parseCSVLine(line);
-                } else if (line.includes('\t')) {
-                    parts = line.split('\t').map(p => p.trim());
-                } else {
-                    parts = line.split(/ {2,}/).map(p => p.trim());
-                }
-                
+                let parts = isCSV ? parseCSVLine(line)
+                    : line.includes('\t') ? line.split('\t').map(p => p.trim())
+                    : line.split(/ {2,}/).map(p => p.trim());
                 if (parts.length >= 4) {
                     let nodeName = parts[0]?.trim() || '';
                     if (nodeName) window.allCoreNodes.add(nodeName);
-                    
                     parsedData.push({
                         node: nodeName,
                         type: parts[1]?.trim() || '',
                         direction: parts[2]?.trim() || '',
                         topic: parts[3]?.trim() || '',
                         msgType: parts[4]?.trim() || '',
-                        source: parts[5] && parts[5].trim() !== '外部 / 未知' && parts[5].trim() !== '—（外部）' && parts[5].trim() !== '' ? parts[5].trim() : 'External',
-                        callback: parts[6] && parts[6].trim() !== '' ? parts[6].trim() : '-',
-                        dataFormat: parts[7] && parts[7].trim() !== '' ? parts[7].trim() : '-',
-                        desc: parts[8]?.trim() || (parts.length > 5 ? parts[parts.length-1].trim() : '')
+                        source: parts[5] && !['外部 / 未知','—（外部）',''].includes(parts[5].trim()) ? parts[5].trim() : 'External',
+                        callback: parts[6]?.trim() || '-',
+                        dataFormat: parts[7]?.trim() || '-',
+                        desc: parts[8]?.trim() || ''
                     });
                 }
             });
 
-            if (parsedData.length === 0) {
-                alert("無法解析資料，請確認格式是否正確。"); return;
-            }
+            if (parsedData.length === 0) { alert("無法解析資料，請確認格式。"); return; }
 
-            // 預設將所有節點設為顯示(全開)
             window.activeCoreNodes = new Set(window.allCoreNodes);
-
             closeImportModal();
-            document.getElementById('status-text').innerText = `已成功解析 ${parsedData.length} 筆資料規則`;
-            
+            updateStats();
+            updateTopicList();
             updateFilterUI();
             updateAllViews();
+            showUIExtras();
+            document.getElementById('status-text').innerText = `已成功解析 ${parsedData.length} 筆資料`;
+            showToast(`✅ 成功載入 ${parsedData.length} 筆資料，${window.allCoreNodes.size} 個核心節點`);
         }
 
-        // 核心邏輯：計算目前「主節點」與「關聯節點」應顯示的所有資料
-        function getVisibleData() {
-            // 全開狀態，直接返回全部資料，節省效能
-            if (window.activeCoreNodes.size === window.allCoreNodes.size) {
-                return parsedData;
-            }
+        // ─── 統計面板 ────────────────────────────────────────────────
+        function updateStats() {
+            const panel = document.getElementById('stats-panel');
+            panel.classList.remove('hidden');
+            panel.classList.add('grid');
+            const topics = new Set(parsedData.map(d => d.topic));
+            const pubs = parsedData.filter(d => d.direction.includes('發布')).length;
+            const subs = parsedData.filter(d => d.direction.includes('訂閱')).length;
+            animateStat('stat-nodes', window.allCoreNodes.size);
+            animateStat('stat-topics', topics.size);
+            animateStat('stat-pubs', pubs);
+            animateStat('stat-subs', subs);
+        }
 
+        function animateStat(id, target) {
+            const el = document.getElementById(id);
+            let current = 0;
+            const step = Math.ceil(target / 20);
+            const timer = setInterval(() => {
+                current = Math.min(current + step, target);
+                el.textContent = current;
+                if (current >= target) clearInterval(timer);
+            }, 30);
+        }
+
+        // ─── 顯示額外 UI 元素（sidebar button already always visible） ──
+        function showUIExtras() {
+            // floating settings button is always visible; nothing else to toggle
+        }
+
+        // ─── Topic 下拉清單 ──────────────────────────────────────────
+        function updateTopicList() {
+            const datalist = document.getElementById('topic-list');
+            datalist.innerHTML = '';
+            const topics = new Set(parsedData.map(d => d.topic));
+            Array.from(topics).sort().forEach(t => {
+                const option = document.createElement('option');
+                option.value = t;
+                datalist.appendChild(option);
+            });
+        }
+
+        // ─── Topic 查詢 ──────────────────────────────────────────────
+        function searchTopic() {
+            const input = document.getElementById('topic-search-input').value.trim();
+            if (!input) { alert("請輸入欲查詢的 Topic 名稱！"); return; }
+            let found = false;
+            const relatedNodes = new Set();
+            parsedData.forEach(d => {
+                if (d.topic === input || d.topic.replace(/"/g, "'") === input) {
+                    found = true;
+                    if (window.allCoreNodes.has(d.node)) relatedNodes.add(d.node);
+                    if (d.source && window.allCoreNodes.has(d.source)) relatedNodes.add(d.source);
+                }
+            });
+            if (!found) { alert(`找不到名為 "${input}" 的 Topic！`); return; }
+            if (relatedNodes.size === 0) { alert('此 Topic 沒有與任何內部核心節點關聯。'); return; }
+            window.activeCoreNodes.clear();
+            relatedNodes.forEach(n => window.activeCoreNodes.add(n));
+            updateFilterUI();
+            updateAllViews();
+            showTopicDetails(input);
+        }
+
+        // ─── 可視資料過濾 ────────────────────────────────────────────
+        function getVisibleData() {
+            if (window.activeCoreNodes.size === window.allCoreNodes.size) return parsedData;
             const visibleRecords = new Set();
             const globalPublishers = {};
-            
             parsedData.forEach(d => {
-                if (d.direction.includes('發布') || d.direction.includes('Server')) {
-                    globalPublishers[d.topic] = d.node;
-                }
+                if (d.direction.includes('發布') || d.direction.includes('Server')) globalPublishers[d.topic] = d.node;
             });
-
-            // 1. 加入所有主動勾選節點(Active)的資料
+            parsedData.forEach(d => { if (window.activeCoreNodes.has(d.node)) visibleRecords.add(d); });
             parsedData.forEach(d => {
-                if (window.activeCoreNodes.has(d.node)) {
-                    visibleRecords.add(d);
-                }
-            });
-
-            // 2. 智慧掃描：把那些未被勾選的節點，如果跟被勾選的節點有直接關聯，就把該筆「關聯紀錄」加進來
-            parsedData.forEach(d => {
-                if (window.activeCoreNodes.has(d.node)) return; // 已經在 Pass 1 處理過
-
-                // 如果它是訂閱者，它的發布來源是 Active 節點嗎？
+                if (window.activeCoreNodes.has(d.node)) return;
                 if (d.direction.includes('訂閱')) {
                     const pubNode = globalPublishers[d.topic] || d.source;
-                    if (pubNode && window.activeCoreNodes.has(pubNode)) {
-                        visibleRecords.add(d);
-                    }
+                    if (pubNode && window.activeCoreNodes.has(pubNode)) visibleRecords.add(d);
                 }
-                
-                // 如果它是發布者，有任何 Active 節點訂閱它嗎？
                 if (d.direction.includes('發布') || d.direction.includes('Server')) {
                     let isSubscribedByActive = false;
                     visibleRecords.forEach(vd => {
-                        if (vd.direction.includes('訂閱') && vd.topic === d.topic && window.activeCoreNodes.has(vd.node)) {
-                            isSubscribedByActive = true;
-                        }
+                        if (vd.direction.includes('訂閱') && vd.topic === d.topic && window.activeCoreNodes.has(vd.node)) isSubscribedByActive = true;
                     });
                     if (isSubscribedByActive) visibleRecords.add(d);
                 }
-                
-                // 如果它是 Client (對 Server 請求)，它的 Server 是 Active 節點嗎？
                 if (d.direction.includes('Client') || d.direction.includes('Service')) {
-                    if (d.source && window.activeCoreNodes.has(d.source)) {
-                        visibleRecords.add(d);
-                    }
-
-                    // 或者，如果它是 Server，有 Active 節點對它做 Client 請求嗎？
+                    if (d.source && window.activeCoreNodes.has(d.source)) visibleRecords.add(d);
                     let isCalledByActive = false;
                     visibleRecords.forEach(vd => {
-                        if ((vd.direction.includes('Client') || vd.direction.includes('Service')) && 
-                             vd.source === d.node && window.activeCoreNodes.has(vd.node) && vd.topic === d.topic) {
-                            isCalledByActive = true;
-                        }
+                        if ((vd.direction.includes('Client') || vd.direction.includes('Service')) &&
+                            vd.source === d.node && window.activeCoreNodes.has(vd.node) && vd.topic === d.topic) isCalledByActive = true;
                     });
                     if (isCalledByActive) visibleRecords.add(d);
                 }
             });
-
             return Array.from(visibleRecords);
         }
 
-        // 更新過濾器 UI (取消隱藏狀態變為水泥灰)
+        // ─── 過濾器 UI ───────────────────────────────────────────────
         function updateFilterUI() {
             const container = document.getElementById('node-filters');
-            if (!container) return;
             container.innerHTML = '';
-            
             if (window.allCoreNodes.size === 0) {
                 container.innerHTML = '<span class="text-xs text-slate-500 italic">請先匯入資料...</span>';
                 return;
             }
-
-            const sortedNodes = Array.from(window.allCoreNodes).sort();
-
-            sortedNodes.forEach(node => {
+            Array.from(window.allCoreNodes).sort().forEach(node => {
                 const isActive = window.activeCoreNodes.has(node);
                 const btn = document.createElement('button');
-                
-                if (isActive) {
-                    btn.className = "px-3 py-1.5 text-xs font-bold rounded-lg bg-oak text-slate-800 border-2 border-oak transition-all shadow-sm transform hover:-translate-y-0.5";
-                } else {
-                    btn.className = "px-3 py-1.5 text-xs font-bold rounded-lg bg-cement text-slate-600 border-2 border-cement transition-all hover:border-oak hover:bg-ecru hover:text-slate-700";
-                }
-                
+                btn.className = isActive
+                    ? "filter-chip px-3 py-1.5 text-xs font-bold rounded-lg bg-oak text-slate-800 border-2 border-oak shadow-sm hover:-translate-y-0.5"
+                    : "filter-chip px-3 py-1.5 text-xs font-bold rounded-lg bg-cement text-slate-600 border-2 border-cement hover:border-oak hover:bg-ecru hover:text-slate-700";
                 btn.innerText = node;
                 btn.onclick = () => {
+                    document.getElementById('topic-search-input').value = '';
                     if (isActive) window.activeCoreNodes.delete(node);
                     else window.activeCoreNodes.add(node);
-                    
                     updateFilterUI();
                     updateAllViews();
                 };
@@ -513,44 +975,53 @@
         }
 
         function toggleAllFilters(state) {
-            if (state) {
-                window.allCoreNodes.forEach(n => window.activeCoreNodes.add(n));
-            } else {
-                window.activeCoreNodes.clear();
-            }
+            document.getElementById('topic-search-input').value = '';
+            if (state) window.allCoreNodes.forEach(n => window.activeCoreNodes.add(n));
+            else window.activeCoreNodes.clear();
             updateFilterUI();
             updateAllViews();
         }
 
         function updateAllViews() {
-            updateMermaidGraph();
+            scheduleRender();
             updateTable();
             updateNodeCards();
         }
 
-        // 產生並渲染 Mermaid SVG (透過可視資料過濾並客製化節點樣式)
+        // ─── Mermaid 圖表渲染 ────────────────────────────────────────
         async function updateMermaidGraph() {
             const container = document.getElementById('mermaid-render-area');
-            
+            const badge = document.getElementById('render-badge');
+            const badgeText = document.getElementById('render-badge-text');
+
             if (window.activeCoreNodes.size === 0) {
-                container.innerHTML = '<div class="text-slate-500 font-bold mt-10 text-center">所有主節點皆已隱藏，請從上方勾選要在意的節點。</div>';
+                container.innerHTML = '<div class="text-slate-500 font-bold mt-10 text-center">所有主節點皆已隱藏，請從上方勾選節點，或查詢特定 Topic。</div>';
+                badge.classList.add('hidden');
                 return;
             }
-            
+
             container.innerHTML = '<div class="text-oak font-bold mt-10 animate-pulse text-lg text-center">圖表產生中，請稍候...</div>';
+            badge.classList.add('hidden');
 
             const visibleData = getVisibleData();
-
-            window.nodeIdMap = {}; 
+            window.nodeIdMap = {};
             const coreNodes = new Set();
             const externalNodes = new Set();
             const publishers = {};
-            
+
             visibleData.forEach(d => {
                 if (d.direction.includes('發布')) publishers[d.topic] = d.node;
             });
 
-            let mermaidStr = '%%{init: {"flowchart": {"curve": "step"}}}%%\nflowchart LR\n';
+            const s = window.sbSettings;
+            const dir = s.direction;
+            const curve = s.curve;
+            const rankSpacing = s.rankSpacing;
+            const nodeSpacing = s.nodeSpacing;
+            const padding = s.padding;
+            const layout = s.layout;
+
+            let mermaidStr = `%%{init: {"flowchart": {"curve": "${curve}", "rankSpacing": ${rankSpacing}, "nodeSpacing": ${nodeSpacing}, "padding": ${padding}${layout === 'elk' ? ', "defaultRenderer": "elk"' : ''}}}}%%\nflowchart ${dir}\n`;
 
             visibleData.forEach(d => {
                 coreNodes.add(d.node);
@@ -559,193 +1030,163 @@
                 }
             });
 
+            // Helper: wrap node label in the chosen shape syntax
+            function nodeWrap(label) {
+                switch(s.nodeShape) {
+                    case 'rounded':  return `("${label}")`;
+                    case 'stadium':  return `(["${label}"])`;
+                    case 'hexagon':  return `{{"${label}"}}`;
+                    default:         return `["${label}"]`;
+                }
+            }
+
+            // Helper: edge syntax based on style
+            function edgeSyntax(label) {
+                const lbl = label ? ` "${label}" ` : ' ';
+                switch(s.edgeStyle) {
+                    case 'dashed': return `-.->${lbl}`;
+                    case 'thick':  return `==>${lbl}`;
+                    default:       return `--${lbl}-->`;
+                }
+            }
+
             if (externalNodes.size > 0) {
                 mermaidStr += '    subgraph ExternalGroup ["外部系統 / 來源"]\n';
                 externalNodes.forEach(n => {
                     const safeId = n.replace(/[^a-zA-Z0-9]/g, '_');
                     window.nodeIdMap[safeId] = n;
-                    mermaidStr += `        ${safeId}["${n}"]\n`;
-                    mermaidStr += `        click ${safeId} call showNodeDetails("${safeId}") "點擊查看 ${n} 的詳細說明"\n`;
-                    // 外部節點樣式
+                    mermaidStr += `        ${safeId}${nodeWrap(n)}\n`;
+                    mermaidStr += `        click ${safeId} call showNodeDetails("${safeId}") "點擊查看 ${n}"\n`;
                     mermaidStr += `        style ${safeId} fill:#f8fafc,stroke:#cbd5e1,stroke-width:2px,stroke-dasharray: 4 4\n`;
                 });
                 mermaidStr += '    end\n\n';
             }
 
-            mermaidStr += '    subgraph CoreGroup ["內部運算節點 (Core Nodes)"]\n';
+            mermaidStr += '    subgraph CoreGroup ["內部運算節點"]\n';
             coreNodes.forEach(n => {
                 const safeId = n.replace(/[^a-zA-Z0-9]/g, '_');
                 window.nodeIdMap[safeId] = n;
-                mermaidStr += `        ${safeId}["${n}"]\n`;
-                mermaidStr += `        click ${safeId} call showNodeDetails("${safeId}") "點擊查看 ${n} 的詳細說明"\n`;
-                
-                // 動態設定樣式：主選節點(實線/白底)，關聯節點(虛線/沙色底)
-                if (window.activeCoreNodes.has(n)) {
-                    mermaidStr += `        style ${safeId} fill:#ffffff,stroke:#D9C5B2,stroke-width:3px\n`;
-                } else {
-                    mermaidStr += `        style ${safeId} fill:#F3EFE0,stroke:#A9A9A9,stroke-width:2px,stroke-dasharray: 5 5\n`;
-                }
+                mermaidStr += `        ${safeId}${nodeWrap(n)}\n`;
+                mermaidStr += `        click ${safeId} call showNodeDetails("${safeId}") "點擊查看 ${n}"\n`;
+                mermaidStr += window.activeCoreNodes.has(n)
+                    ? `        style ${safeId} fill:#ffffff,stroke:#D9C5B2,stroke-width:3px\n`
+                    : `        style ${safeId} fill:#F3EFE0,stroke:#A9A9A9,stroke-width:2px,stroke-dasharray: 5 5\n`;
             });
             mermaidStr += '    end\n\n';
 
             let edges = new Set();
             visibleData.forEach(d => {
                 const nodeId = d.node.replace(/[^a-zA-Z0-9]/g, '_');
-                const safeTopic = d.topic.replace(/"/g, "'"); 
-                
+                const safeTopic = d.topic.replace(/"/g, "'");
                 if (d.direction.includes('訂閱')) {
                     let fromNode = publishers[d.topic] ? publishers[d.topic] : d.source;
                     if (!fromNode || fromNode === '-') return;
                     let fromId = fromNode.replace(/[^a-zA-Z0-9]/g, '_');
-                    let edge = `    ${fromId} -- "${safeTopic}" --> ${nodeId}\n`;
+                    let edge = `    ${fromId} ${edgeSyntax(safeTopic)}${nodeId}\n`;
                     if (!edges.has(edge)) { mermaidStr += edge; edges.add(edge); }
-                } 
-                else if (d.direction.includes('Client') || d.direction.includes('Service')) {
+                } else if (d.direction.includes('Client') || d.direction.includes('Service')) {
                     let toNode = d.source;
                     if (!toNode || toNode === '-') return;
                     let toId = toNode.replace(/[^a-zA-Z0-9]/g, '_');
-                    let edge = `    ${nodeId} -- "${d.type}: ${safeTopic}" --> ${toId}\n`;
+                    let edge = `    ${nodeId} ${edgeSyntax(`${d.type}: ${safeTopic}`)}${toId}\n`;
                     if (!edges.has(edge)) { mermaidStr += edge; edges.add(edge); }
                 }
             });
 
-            // 背景群組框線簡化，依賴節點本身的顏色來區分
-            mermaidStr += '\n    %% 群組外框設定\n';
-            mermaidStr += '    style ExternalGroup fill:none,stroke:#e0d3c5,stroke-width:2px,stroke-dasharray: 5 5\n';
+            mermaidStr += '\n    style ExternalGroup fill:none,stroke:#e0d3c5,stroke-width:2px,stroke-dasharray: 5 5\n';
             mermaidStr += '    style CoreGroup fill:none,stroke:#D9C5B2,stroke-width:2px\n';
+
+            window.currentMermaidSource = mermaidStr;
 
             try {
                 const { svg, bindFunctions } = await mermaid.render('dynamic-mermaid-graph', mermaidStr);
                 container.innerHTML = svg;
                 if (bindFunctions) bindFunctions(container);
                 bindEdgeClicks(container);
+                // Show render badge
+                badge.classList.remove('hidden');
+                badge.classList.add('flex');
+                const edgeCount = edges.size;
+                badgeText.textContent = `${coreNodes.size} 節點 · ${edgeCount} 連線`;
             } catch (err) {
-                container.innerHTML = `<div class="text-red-500">圖表渲染失敗: <pre>${err.message}</pre></div>`;
+                container.innerHTML = `<div class="text-red-500 p-4">圖表渲染失敗：<pre class="text-xs mt-2">${err.message}</pre></div>`;
             }
         }
 
         function bindEdgeClicks(container) {
-            const edgeLabels = container.querySelectorAll('.edgeLabel');
-            edgeLabels.forEach(el => {
-                el.addEventListener('click', (e) => {
+            container.querySelectorAll('.edgeLabel').forEach(el => {
+                el.addEventListener('click', e => {
                     e.stopPropagation();
-                    let labelText = el.textContent.trim();
-                    let actualTopic = labelText.replace(/^(Action|Service):\s*/, '');
-                    showTopicDetails(actualTopic);
+                    showTopicDetails(el.textContent.trim().replace(/^(Action|Service):\s*/, ''));
                 });
             });
         }
 
-        // 顯示 Topic 的詳細資訊 (使用原始資料以確保點擊時看得到全貌)
+        // ─── Topic 詳細 Modal ────────────────────────────────────────
         window.showTopicDetails = function(topicName) {
             document.getElementById('detail-topic-name').innerText = topicName;
             const contentDiv = document.getElementById('detail-topic-content');
             contentDiv.innerHTML = '';
-
             const records = parsedData.filter(d => d.topic === topicName || d.topic.replace(/"/g, "'") === topicName);
-
             if (records.length === 0) {
                 contentDiv.innerHTML = '<p class="text-slate-500 p-4 font-bold">無法找到此介面的詳細資料。</p>';
             } else {
-                let senders = new Set();
-                let receivers = new Set();
-
+                let senders = new Set(), receivers = new Set();
                 records.forEach(r => {
-                    if (r.direction.includes('發布')) {
-                        senders.add(r.node);
-                    } else if (r.direction.includes('訂閱')) {
+                    if (r.direction.includes('發布')) { senders.add(r.node); }
+                    else if (r.direction.includes('訂閱')) {
                         receivers.add(r.node);
-                        if (r.source && r.source !== '-' && !r.source.includes('外部') && r.source !== 'External') {
-                            senders.add(r.source);
-                        }
+                        if (r.source && r.source !== '-' && !r.source.includes('外部') && r.source !== 'External') senders.add(r.source);
                     } else if (r.direction.includes('Client') || r.direction.includes('Service')) {
                         senders.add(r.node);
-                        if (r.source && r.source !== '-' && !r.source.includes('外部') && r.source !== 'External') {
-                            receivers.add(r.source);
-                        }
+                        if (r.source && r.source !== '-' && !r.source.includes('外部') && r.source !== 'External') receivers.add(r.source);
                     }
                 });
-
                 const senderText = senders.size > 0 ? Array.from(senders).join(', ') : '外部 / 未知';
                 const receiverText = receivers.size > 0 ? Array.from(receivers).join(', ') : '外部 / 未知';
-
                 let detailRecords = records.filter(d => d.direction.includes('訂閱'));
-                if (detailRecords.length === 0) { detailRecords = records; }
-
+                if (detailRecords.length === 0) detailRecords = records;
                 const typeText = records[0].type;
 
-                let html = `
-                    <div class="border border-oak/30 rounded-2xl bg-white shadow-sm overflow-hidden mb-6">
-                        <div class="bg-cement/50 p-6 border-b border-oak/30">
-                            <div class="flex flex-col md:flex-row items-center justify-center gap-3 w-full max-w-2xl mx-auto">
-                                <div class="flex-1 flex justify-end w-full md:w-auto">
-                                    <div class="px-4 py-2.5 bg-white border-2 border-oak rounded-xl text-sm md:text-base font-bold text-slate-800 shadow-sm flex items-center gap-2 text-center md:text-right">
-                                        <svg class="w-4 h-4 text-oak shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01"></path></svg>
-                                        ${senderText}
-                                    </div>
-                                </div>
-                                <div class="flex flex-col items-center justify-center min-w-[120px] px-2 relative py-2 md:py-0">
-                                    <div class="text-[10px] mb-1.5 font-mono font-bold text-slate-800 bg-ecru px-2.5 py-1 rounded-full border border-oak truncate max-w-[200px]" title="${topicName}">
-                                        ${topicName}
-                                    </div>
-                                    <div class="flex items-center w-full relative">
-                                        <div class="h-[3px] bg-oak w-full rounded"></div>
-                                        <svg class="w-5 h-5 text-oak absolute -right-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M9 5l7 7-7 7"></path></svg>
-                                    </div>
-                                    <span class="text-[10px] mt-1.5 font-bold text-slate-500">
-                                        ${typeText}
-                                    </span>
-                                </div>
-                                <div class="flex-1 flex justify-start w-full md:w-auto">
-                                    <div class="px-4 py-2.5 bg-white border-2 border-cement rounded-xl text-sm md:text-base font-bold text-slate-800 shadow-sm flex items-center gap-2 text-center md:text-left">
-                                        <svg class="w-4 h-4 text-cement shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
-                                        ${receiverText}
-                                    </div>
-                                </div>
+                let html = `<div class="border border-oak/30 rounded-2xl bg-white shadow-sm overflow-hidden mb-6">
+                    <div class="bg-cement/50 p-6 border-b border-oak/30">
+                        <div class="flex flex-col md:flex-row items-center justify-center gap-3 w-full max-w-2xl mx-auto">
+                            <div class="flex-1 flex justify-end"><div class="px-4 py-2.5 bg-white border-2 border-oak rounded-xl text-sm font-bold text-slate-800 shadow-sm flex items-center gap-2">${senderText}</div></div>
+                            <div class="flex flex-col items-center min-w-[120px] px-2 relative">
+                                <div class="text-[10px] mb-1.5 font-mono font-bold text-slate-800 bg-ecru px-2.5 py-1 rounded-full border border-oak truncate max-w-[200px]" title="${topicName}">${topicName}</div>
+                                <div class="flex items-center w-full relative"><div class="h-[3px] bg-oak w-full rounded"></div><svg class="w-5 h-5 text-oak absolute -right-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M9 5l7 7-7 7"></path></svg></div>
+                                <span class="text-[10px] mt-1.5 font-bold text-slate-500">${typeText}</span>
                             </div>
+                            <div class="flex-1 flex justify-start"><div class="px-4 py-2.5 bg-white border-2 border-cement rounded-xl text-sm font-bold text-slate-800 shadow-sm flex items-center gap-2">${receiverText}</div></div>
                         </div>
-                        <div class="p-5">
-                `;
-
+                    </div>
+                    <div class="p-5">`;
                 html += detailRecords.map(d => `
-                            <div class="${detailRecords.length > 1 ? 'mb-6 border-b border-cement pb-4 last:border-0 last:mb-0 last:pb-0' : ''}">
-                                ${detailRecords.length > 1 ? `<h4 class="font-bold text-slate-800 mb-3 text-sm flex items-center gap-2"><svg class="w-4 h-4 text-oak" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg> 接收節點 [${d.node}] 的處理細節</h4>` : ''}
-                                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm mb-5">
-                                    <div class="bg-cement/30 p-3.5 rounded-xl border border-oak/20">
-                                        <span class="text-slate-500 block text-[10px] uppercase font-bold mb-1.5 tracking-wider">Callback 函式</span> 
-                                        <code class="text-slate-800 font-mono text-xs break-all">${d.callback}</code>
-                                    </div>
-                                    <div class="bg-cement/30 p-3.5 rounded-xl border border-oak/20">
-                                        <span class="text-slate-500 block text-[10px] uppercase font-bold mb-1.5 tracking-wider">資料格式 / 訊息型別</span> 
-                                        <code class="text-slate-800 font-mono text-xs block overflow-x-auto whitespace-pre-wrap">${d.dataFormat !== '-' ? d.dataFormat : d.msgType}</code>
-                                    </div>
-                                </div>
-                                <div class="p-4 rounded-xl border-l-4 border-oak bg-cement/50 text-slate-800 text-sm leading-relaxed">
-                                    <span class="text-slate-900 font-bold text-xs block mb-2 flex items-center gap-1.5">
-                                        <svg class="w-4 h-4 text-oak" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-                                        介面說明
-                                    </span>
-                                    ${d.desc ? d.desc : '<span class="text-slate-500 italic font-bold">無詳細說明</span>'}
-                                </div>
-                            </div>
+                    <div class="${detailRecords.length > 1 ? 'mb-6 border-b border-cement pb-4 last:border-0 last:mb-0 last:pb-0' : ''}">
+                        ${detailRecords.length > 1 ? `<h4 class="font-bold text-slate-800 mb-3 text-sm">接收節點 [${d.node}]</h4>` : ''}
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm mb-5">
+                            <div class="bg-cement/30 p-3.5 rounded-xl border border-oak/20"><span class="text-slate-500 block text-[10px] uppercase font-bold mb-1.5 tracking-wider">Callback 函式</span><code class="text-slate-800 font-mono text-xs break-all">${d.callback}</code></div>
+                            <div class="bg-cement/30 p-3.5 rounded-xl border border-oak/20"><span class="text-slate-500 block text-[10px] uppercase font-bold mb-1.5 tracking-wider">資料格式 / 訊息型別</span><code class="text-slate-800 font-mono text-xs block overflow-x-auto whitespace-pre-wrap">${d.dataFormat !== '-' ? d.dataFormat : d.msgType}</code></div>
+                        </div>
+                        <div class="p-4 rounded-xl border-l-4 border-oak bg-cement/50 text-slate-800 text-sm leading-relaxed">
+                            <span class="text-slate-900 font-bold text-xs block mb-2">介面說明</span>
+                            ${d.desc ? d.desc : '<span class="text-slate-500 italic font-bold">無詳細說明</span>'}
+                        </div>
+                    </div>
                 `).join('');
-
-                html += `</div></div>`;
+                html += '</div></div>';
                 contentDiv.innerHTML = html;
             }
             openTopicDetailModal();
         };
 
-        // 顯示 Node 的詳細資訊 (使用原始資料確保完整性)
+        // ─── Node 詳細 Modal ─────────────────────────────────────────
         window.showNodeDetails = function(safeId) {
             const originalName = window.nodeIdMap[safeId];
             if (!originalName) return;
             document.getElementById('detail-node-name').innerText = originalName;
             const contentDiv = document.getElementById('detail-node-content');
-            contentDiv.innerHTML = '';
-
             const nodeData = parsedData.filter(d => d.node === originalName || d.source === originalName);
-
             if (nodeData.length === 0) {
                 contentDiv.innerHTML = '<p class="text-slate-500 font-bold">無相關詳細資料。</p>';
             } else {
@@ -753,24 +1194,22 @@
                 const subs = nodeData.filter(d => d.node === originalName && d.direction.includes('訂閱'));
                 const acts = nodeData.filter(d => d.node === originalName && (d.direction.includes('Client') || d.direction.includes('Service')));
                 const asSource = nodeData.filter(d => d.source === originalName && d.direction.includes('訂閱'));
-
-                contentDiv.innerHTML = `
-                    ${generateDetailSection('發布 (Publishers)', pubs, 'text-slate-800', 'bg-cement border-oak')}
-                    ${generateDetailSection('訂閱 (Subscribers)', subs, 'text-slate-800', 'bg-cement border-oak')}
-                    ${generateDetailSection('Action / Service', acts, 'text-slate-800', 'bg-cement border-slate-300')}
-                    ${generateDetailSection('作為來源輸出給其他節點', asSource, 'text-slate-800', 'bg-cement border-oak')}
-                `;
+                contentDiv.innerHTML =
+                    generateDetailSection('發布 (Publishers)', pubs, 'bg-cement border-oak') +
+                    generateDetailSection('訂閱 (Subscribers)', subs, 'bg-cement border-oak') +
+                    generateDetailSection('Action / Service', acts, 'bg-cement border-slate-300') +
+                    generateDetailSection('作為來源輸出', asSource, 'bg-cement border-oak');
             }
             openNodeDetailModal();
         };
 
-        function generateDetailSection(title, data, textColor, customStyle) {
+        function generateDetailSection(title, data, customStyle) {
             if (data.length === 0) return '';
-            let itemsHtml = data.map(d => `
+            const itemsHtml = data.map(d => `
                 <div class="border border-oak/20 rounded-lg p-4 mb-3 hover:shadow-md transition-shadow bg-white">
                     <div class="flex flex-wrap items-start justify-between mb-2 gap-2">
                         <div class="flex items-center gap-2">
-                            <span class="font-mono font-bold text-sm ${textColor}">${d.topic}</span>
+                            <span class="font-mono font-bold text-sm text-slate-800">${d.topic}</span>
                             <span class="text-[10px] px-2 py-0.5 rounded bg-cement/50 text-slate-700 font-medium border border-oak/30">${d.msgType || '未知型別'}</span>
                         </div>
                         <span class="text-[10px] px-2 py-0.5 rounded ${customStyle} font-bold">${d.type}</span>
@@ -778,11 +1217,136 @@
                     <div class="text-sm text-slate-700 bg-cement/30 p-3 rounded border-l-2 border-oak">
                         ${d.desc ? d.desc : '<span class="text-slate-400 italic font-bold">無詳細說明</span>'}
                     </div>
-                </div>
-            `).join('');
+                </div>`).join('');
             return `<div class="mb-6"><h3 class="text-md font-bold text-slate-800 mb-3 border-b border-oak/30 pb-2 flex items-center gap-2"><div class="w-2 h-2 rounded-full bg-oak"></div>${title} <span class="text-xs font-normal text-slate-500 ml-2">(${data.length})</span></h3>${itemsHtml}</div>`;
         }
 
+        // ─── 表格視圖 ────────────────────────────────────────────────
+        function updateTable() {
+            window.tableFilteredData = getVisibleData();
+            renderTable();
+        }
+
+        function filterTable() {
+            const query = document.getElementById('table-search').value.toLowerCase().trim();
+            const clearBtn = document.getElementById('clear-search-btn');
+            const matchCount = document.getElementById('table-match-count');
+
+            clearBtn.classList.toggle('hidden', !query);
+
+            if (!query) {
+                window.tableFilteredData = getVisibleData();
+                matchCount.classList.add('hidden');
+            } else {
+                window.tableFilteredData = getVisibleData().filter(d =>
+                    d.node.toLowerCase().includes(query) ||
+                    d.topic.toLowerCase().includes(query) ||
+                    d.type.toLowerCase().includes(query) ||
+                    d.msgType.toLowerCase().includes(query) ||
+                    d.desc.toLowerCase().includes(query)
+                );
+                matchCount.classList.remove('hidden');
+                matchCount.textContent = `找到 ${window.tableFilteredData.length} 筆`;
+            }
+            renderTable(query);
+        }
+
+        function sortTable(col) {
+            const state = window.tableSortState;
+            if (state.col === col) state.asc = !state.asc;
+            else { state.col = col; state.asc = true; }
+
+            // Update indicators
+            document.querySelectorAll('.sort-indicator').forEach(el => {
+                el.textContent = el.dataset.col === col ? (state.asc ? '↑' : '↓') : '↕';
+            });
+
+            window.tableFilteredData.sort((a, b) => {
+                const av = a[col] || '', bv = b[col] || '';
+                return state.asc ? av.localeCompare(bv) : bv.localeCompare(av);
+            });
+            renderTable(document.getElementById('table-search').value.toLowerCase().trim());
+        }
+
+        function highlight(text, query) {
+            if (!query || !text) return text || '';
+            const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            return text.replace(new RegExp(escaped, 'gi'), m => `<mark class="search-highlight">${m}</mark>`);
+        }
+
+        function renderTable(query = '') {
+            const tbody = document.getElementById('data-table-body');
+            tbody.innerHTML = '';
+            if (window.tableFilteredData.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="5" class="px-6 py-8 text-center text-slate-400">${query ? `沒有符合「${query}」的資料` : '目前沒有可顯示的資料'}</td></tr>`;
+                return;
+            }
+            window.tableFilteredData.forEach(d => {
+                const tr = document.createElement('tr');
+                tr.className = "hover:bg-cement/30 transition-colors cursor-pointer";
+                tr.onclick = () => {
+                    const safeId = d.node.replace(/[^a-zA-Z0-9]/g, '_');
+                    window.nodeIdMap[safeId] = d.node;
+                    showNodeDetails(safeId);
+                };
+                const isTopic = d.type.toLowerCase() === 'topic';
+                const typeStyle = isTopic ? 'bg-oak/30 text-slate-800' : 'bg-cement/50 text-slate-800';
+                const isContext = !window.activeCoreNodes.has(d.node);
+                const nodeBadge = isContext ? `<span class="ml-2 px-1.5 py-0.5 bg-cement/80 text-slate-600 rounded text-[10px] font-bold">關聯</span>` : '';
+                const desc = d.desc.length > 60 ? d.desc.substring(0, 60) + '...' : d.desc;
+                tr.innerHTML = `
+                    <td class="px-6 py-4 font-bold text-slate-800">${highlight(d.node, query)}${nodeBadge}</td>
+                    <td class="px-6 py-4 whitespace-nowrap"><span class="px-2 py-1 rounded text-[10px] font-bold ${typeStyle}">${highlight(d.type, query)}</span> <span class="text-slate-600">${d.direction}</span></td>
+                    <td class="px-6 py-4 font-mono text-slate-700 text-xs">${highlight(d.topic, query)}</td>
+                    <td class="px-6 py-4 text-slate-500 text-xs font-bold">${highlight(d.msgType || '-', query)}</td>
+                    <td class="px-6 py-4 text-xs text-slate-600 truncate max-w-xs" title="${d.desc}">${highlight(desc || '-', query)}</td>`;
+                tbody.appendChild(tr);
+            });
+        }
+
+        // ─── 節點卡片 ────────────────────────────────────────────────
+        function updateNodeCards() {
+            const container = document.getElementById('node-cards-container');
+            container.innerHTML = '';
+            const nodeStats = {};
+            const visibleData = getVisibleData();
+            visibleData.forEach(d => {
+                if (!nodeStats[d.node]) nodeStats[d.node] = { pubs: [], subs: [], acts: [] };
+                if (d.direction.includes('發布')) nodeStats[d.node].pubs.push(d.topic);
+                else if (d.direction.includes('訂閱')) nodeStats[d.node].subs.push(d.topic);
+                else if (d.direction.includes('Client') || d.direction.includes('Service')) nodeStats[d.node].acts.push(d.topic);
+            });
+            const nodes = Object.keys(nodeStats).filter(k => nodeStats[k].pubs.length > 0 || nodeStats[k].subs.length > 0 || nodeStats[k].acts.length > 0);
+            if (nodes.length === 0) {
+                container.innerHTML = '<div class="col-span-1 md:col-span-3 text-center text-slate-400 py-10 font-bold">請於上方勾選節點，此處將顯示其通訊介面總覽。</div>';
+                return;
+            }
+            const borderColors = ['border-oak', 'border-cement'];
+            nodes.forEach((nodeName, index) => {
+                const stats = nodeStats[nodeName];
+                const card = document.createElement('div');
+                const borderColor = borderColors[index % borderColors.length];
+                const isContext = !window.activeCoreNodes.has(nodeName);
+                const nodeBadge = isContext
+                    ? `<span class="text-[10px] bg-cement text-slate-600 px-2 py-0.5 rounded-full font-bold shrink-0 ml-2">關聯節點</span>`
+                    : `<span class="text-[10px] bg-ecru text-slate-700 border border-oak/30 px-2 py-0.5 rounded-full font-bold shrink-0">主節點</span>`;
+                const mkTopics = (arr) => arr.map(t => `<code class="bg-cement/50 border border-oak/30 px-1.5 py-0.5 rounded text-[10px] text-slate-700 block w-full font-mono" title="${t}">${t}</code>`).join('');
+                let detailsHtml = '';
+                if (stats.pubs.length > 0) detailsHtml += `<div class="flex items-start gap-2 text-xs"><span class="w-8 text-slate-700 font-bold uppercase text-[9px] mt-1 bg-cement text-center rounded">Pub</span><div class="flex flex-wrap gap-1 flex-1">${mkTopics(stats.pubs)}</div></div>`;
+                if (stats.subs.length > 0) detailsHtml += `<div class="flex items-start gap-2 text-xs"><span class="w-8 text-slate-700 font-bold uppercase text-[9px] mt-1 bg-cement text-center rounded">Sub</span><div class="flex flex-wrap gap-1 flex-1">${mkTopics(stats.subs)}</div></div>`;
+                if (stats.acts.length > 0) detailsHtml += `<div class="flex items-start gap-2 text-xs"><span class="w-8 text-slate-700 font-bold uppercase text-[9px] mt-1 bg-cement text-center rounded">Act</span><div class="flex flex-wrap gap-1 flex-1">${mkTopics(stats.acts)}</div></div>`;
+                card.className = `node-card bg-white p-5 rounded-xl shadow-md border-t-4 ${borderColor} flex flex-col h-full border-slate-100 cursor-pointer`;
+                card.onclick = () => {
+                    const safeId = nodeName.replace(/[^a-zA-Z0-9]/g, '_');
+                    window.nodeIdMap[safeId] = nodeName;
+                    showNodeDetails(safeId);
+                };
+                card.innerHTML = `<div class="flex justify-between items-start mb-3"><h3 class="font-bold text-slate-800 text-lg truncate pr-2" title="${nodeName}">${nodeName}</h3>${nodeBadge}</div><div class="mt-auto space-y-2.5">${detailsHtml || '<p class="text-xs text-slate-400 font-bold italic">無特定對外介面</p>'}</div>`;
+                container.appendChild(card);
+            });
+        }
+
+        // ─── Modal 控制 ──────────────────────────────────────────────
         function openNodeDetailModal() { toggleModal('node-detail-modal', 'node-detail-modal-content', true); }
         function closeNodeDetailModal() { toggleModal('node-detail-modal', 'node-detail-modal-content', false); }
         function openTopicDetailModal() { toggleModal('topic-detail-modal', 'topic-detail-modal-content', true); }
@@ -793,160 +1357,23 @@
         function toggleModal(bgId, contentId, show) {
             const bg = document.getElementById(bgId);
             const content = document.getElementById(contentId);
-            if(show) {
+            if (show) {
                 bg.classList.remove('hidden');
                 setTimeout(() => { bg.classList.remove('opacity-0'); content.classList.remove('scale-95'); }, 10);
             } else {
-                bg.classList.add('opacity-0');
-                content.classList.add('scale-95');
-                setTimeout(() => { bg.classList.add('hidden'); }, 300);
+                bg.classList.add('opacity-0'); content.classList.add('scale-95');
+                setTimeout(() => bg.classList.add('hidden'), 300);
             }
         }
 
-        function exportStandaloneHTML() {
-            if (parsedData.length === 0) {
-                alert("請先匯入資料產生圖表後，再執行匯出！");
-                return;
+        // ESC 關閉 modal
+        document.addEventListener('keydown', e => {
+            if (e.key === 'Escape') {
+                closeNodeDetailModal(); closeTopicDetailModal(); closeImportModal();
             }
+        });
 
-            const htmlClone = document.documentElement.cloneNode(true);
-
-            // 移除匯出檔案中的「匯入」與「匯出」按鈕及分隔線
-            const btnImport = htmlClone.querySelector('#btn-import');
-            if (btnImport) btnImport.remove();
-            
-            const btnExport = htmlClone.querySelector('#btn-export');
-            if (btnExport) btnExport.remove();
-            
-            const navSeparator = htmlClone.querySelector('#nav-separator');
-            if (navSeparator) navSeparator.remove();
-
-            // 順便移除隱藏的匯入 Modal，讓匯出檔案的原始碼更乾淨
-            const importModal = htmlClone.querySelector('#import-modal');
-            if (importModal) importModal.remove();
-
-            const renderArea = htmlClone.querySelector('#mermaid-render-area');
-            if(renderArea) renderArea.innerHTML = '<div class="text-oak mt-10 font-bold">圖表產生中...</div>';
-            
-            const nodeCards = htmlClone.querySelector('#node-cards-container');
-            if(nodeCards) nodeCards.innerHTML = '';
-            
-            const tableBody = htmlClone.querySelector('#data-table-body');
-            if(tableBody) tableBody.innerHTML = '<tr><td colspan="5" class="px-6 py-8 text-center text-slate-400">載入中...</td></tr>';
-
-            const modals = htmlClone.querySelectorAll('[id$="-modal"]');
-            modals.forEach(modal => {
-                modal.classList.add('hidden', 'opacity-0');
-                const content = modal.querySelector('div');
-                if(content) content.classList.add('scale-95');
-            });
-
-            const initScript = htmlClone.ownerDocument.createElement('script');
-            initScript.textContent = `
-                window.addEventListener('DOMContentLoaded', () => {
-                    parsedData = ${JSON.stringify(parsedData)};
-                    window.allCoreNodes = new Set(${JSON.stringify(Array.from(window.allCoreNodes))});
-                    window.activeCoreNodes = new Set(${JSON.stringify(Array.from(window.activeCoreNodes))});
-                    document.getElementById('status-text').innerText = '已成功載入匯出的資料 (' + parsedData.length + ' 筆)';
-                    updateFilterUI();
-                    updateAllViews();
-                });
-            `;
-            htmlClone.querySelector('body').appendChild(initScript);
-
-            const finalHtml = "<!DOCTYPE html>\n<html lang=\"zh-TW\">\n" + htmlClone.innerHTML + "\n</html>";
-
-            const blob = new Blob([finalHtml], { type: 'text/html;charset=utf-8' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = 'ros_topology_graph.html';
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
-        }
-
-        // 更新表格視圖 (透過過濾後的可視資料，並加上關聯標籤)
-        function updateTable() {
-            const tbody = document.getElementById('data-table-body');
-            tbody.innerHTML = '';
-            
-            const visibleData = getVisibleData();
-            
-            if (visibleData.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="5" class="px-6 py-8 text-center text-slate-400">目前沒有選擇任何節點，故無資料可顯示。</td></tr>';
-                return;
-            }
-
-            visibleData.forEach(d => {
-                const tr = document.createElement('tr');
-                tr.className = "hover:bg-cement/30 transition-colors";
-                const isTopic = d.type.toLowerCase() === 'topic';
-                const typeStyle = isTopic ? 'bg-oak/30 text-slate-800' : 'bg-cement/50 text-slate-800';
-                const desc = d.desc.length > 50 ? d.desc.substring(0, 50) + '...' : d.desc;
-
-                // 標示是否為被動拉進來的「關聯節點」
-                const isContext = !window.activeCoreNodes.has(d.node);
-                const nodeBadge = isContext ? `<span class="ml-2 px-1.5 py-0.5 bg-cement text-white rounded text-[10px]">關聯</span>` : '';
-
-                tr.innerHTML = `
-                    <td class="px-6 py-4 font-bold text-slate-800">${d.node} ${nodeBadge}</td>
-                    <td class="px-6 py-4 whitespace-nowrap"><span class="px-2 py-1 rounded text-[10px] font-bold ${typeStyle}">${d.type}</span> <span class="text-slate-600">${d.direction}</span></td>
-                    <td class="px-6 py-4 font-mono text-slate-700 text-xs">${d.topic}</td>
-                    <td class="px-6 py-4 text-slate-500 text-xs font-bold">${d.msgType || '-'}</td>
-                    <td class="px-6 py-4 text-xs text-slate-600 truncate max-w-xs" title="${d.desc}">${desc || '-'}</td>
-                `;
-                tbody.appendChild(tr);
-            });
-        }
-
-        // 更新下方卡片 (透過過濾後的可視資料，並加上關聯標籤)
-        function updateNodeCards() {
-            const container = document.getElementById('node-cards-container');
-            container.innerHTML = '';
-            const nodeStats = {};
-            
-            const visibleData = getVisibleData();
-
-            visibleData.forEach(d => {
-                if (!nodeStats[d.node]) nodeStats[d.node] = { pubs: [], subs: [], acts: [] };
-                
-                if (d.direction.includes('發布')) nodeStats[d.node].pubs.push(d.topic);
-                else if (d.direction.includes('訂閱')) nodeStats[d.node].subs.push(d.topic);
-                else if (d.direction.includes('Client') || d.direction.includes('Service')) nodeStats[d.node].acts.push(d.topic);
-            });
-
-            const nodes = Object.keys(nodeStats).filter(k => nodeStats[k].pubs.length > 0 || nodeStats[k].subs.length > 0 || nodeStats[k].acts.length > 0);
-            
-            if (nodes.length === 0) {
-                container.innerHTML = '<div class="col-span-1 md:col-span-3 text-center text-slate-400 py-10 font-bold">請於上方勾選您在意的節點，此處將顯示其通訊介面總覽。</div>';
-                return;
-            }
-
-            nodes.forEach((nodeName, index) => {
-                const stats = nodeStats[nodeName];
-                const card = document.createElement('div');
-                const borderColors = ['border-oak', 'border-cement'];
-                const borderColor = borderColors[index % borderColors.length];
-
-                let detailsHtml = '';
-                if (stats.pubs.length > 0) detailsHtml += `<div class="flex items-start gap-2 text-xs"><span class="w-8 text-slate-700 font-bold uppercase text-[9px] mt-1 bg-cement text-center rounded">Pub</span><div class="flex flex-wrap gap-1 flex-1">${stats.pubs.slice(0, 3).map(t => `<code class="bg-cement/50 border border-oak/30 px-1.5 py-0.5 rounded text-[10px] text-slate-700 truncate max-w-[150px] block" title="${t}">${t}</code>`).join('')}${stats.pubs.length > 3 ? `<span class="text-[10px] text-slate-500 mt-0.5 font-bold">+${stats.pubs.length - 3}</span>` : ''}</div></div>`;
-                if (stats.subs.length > 0) detailsHtml += `<div class="flex items-start gap-2 text-xs"><span class="w-8 text-slate-700 font-bold uppercase text-[9px] mt-1 bg-cement text-center rounded">Sub</span><div class="flex flex-wrap gap-1 flex-1">${stats.subs.slice(0, 3).map(t => `<code class="bg-cement/50 border border-oak/30 px-1.5 py-0.5 rounded text-[10px] text-slate-700 truncate max-w-[150px] block" title="${t}">${t}</code>`).join('')}${stats.subs.length > 3 ? `<span class="text-[10px] text-slate-500 mt-0.5 font-bold">+${stats.subs.length - 3}</span>` : ''}</div></div>`;
-                if (stats.acts.length > 0) detailsHtml += `<div class="flex items-start gap-2 text-xs"><span class="w-8 text-slate-700 font-bold uppercase text-[9px] mt-1 bg-cement text-center rounded">Act</span><div class="flex flex-wrap gap-1 flex-1">${stats.acts.slice(0, 3).map(t => `<code class="bg-cement/50 border border-oak/30 px-1.5 py-0.5 rounded text-[10px] text-slate-700 truncate max-w-[150px] block" title="${t}">${t}</code>`).join('')}${stats.acts.length > 3 ? `<span class="text-[10px] text-slate-500 mt-0.5 font-bold">+${stats.acts.length - 3}</span>` : ''}</div></div>`;
-
-                // 右上角標示該卡片是 主動選取的 還是 關係延伸出來的
-                const isContext = !window.activeCoreNodes.has(nodeName);
-                const nodeBadge = isContext ? 
-                    `<span class="text-[10px] bg-cement text-white px-2 py-0.5 rounded-full font-bold shrink-0 ml-2 shadow-sm">關聯節點</span>` : 
-                    `<span class="text-[10px] bg-ecru text-slate-700 border border-oak/30 px-2 py-0.5 rounded-full font-bold shrink-0 shadow-sm">主節點</span>`;
-
-                card.className = `node-card bg-white p-5 rounded-xl shadow-md border-t-4 ${borderColor} flex flex-col h-full border-slate-100 relative`;
-                card.innerHTML = `<div class="flex justify-between items-start mb-3"><h3 class="font-bold text-slate-800 text-lg truncate pr-2" title="${nodeName}">${nodeName}</h3>${nodeBadge}</div><div class="mt-auto space-y-2.5">${detailsHtml || '<p class="text-xs text-slate-400 font-bold italic">無特定對外介面</p>'}</div>`;
-                container.appendChild(card);
-            });
-        }
-
+        // ─── 視圖切換 ────────────────────────────────────────────────
         function switchView(view) {
             const graphView = document.getElementById('graph-view');
             const tableView = document.getElementById('table-view');
@@ -963,7 +1390,40 @@
             }
         }
 
-        // 預設載入的測試資料
+        // ─── 匯出 HTML ───────────────────────────────────────────────
+        function exportStandaloneHTML() {
+            if (parsedData.length === 0) { alert("請先匯入資料後再匯出！"); return; }
+            const htmlClone = document.documentElement.cloneNode(true);
+            ['btn-import','btn-export'].forEach(id => {
+                const el = htmlClone.querySelector('#' + id);
+                if (el) el.remove();
+            });
+            htmlClone.querySelector('#import-modal')?.remove();
+            const renderArea = htmlClone.querySelector('#mermaid-render-area');
+            if (renderArea) renderArea.innerHTML = '<div class="text-oak mt-10 font-bold">圖表產生中...</div>';
+            htmlClone.querySelector('#node-cards-container').innerHTML = '';
+            htmlClone.querySelector('#data-table-body').innerHTML = '<tr><td colspan="5" class="px-6 py-8 text-center text-slate-400">載入中...</td></tr>';
+            const initScript = document.createElement('script');
+            initScript.textContent = `
+                window.addEventListener('DOMContentLoaded', () => {
+                    parsedData = ${JSON.stringify(parsedData)};
+                    window.allCoreNodes = new Set(${JSON.stringify(Array.from(window.allCoreNodes))});
+                    window.activeCoreNodes = new Set(${JSON.stringify(Array.from(window.activeCoreNodes))});
+                    window.sbSettings = ${JSON.stringify(window.sbSettings)};
+                    window.currentGraphDirection = window.sbSettings.direction;
+                    document.getElementById('status-text').innerText = '已成功載入匯出的資料 (' + parsedData.length + ' 筆)';
+                    updateStats(); updateTopicList(); updateFilterUI(); updateAllViews(); showUIExtras();
+                });`;
+            htmlClone.querySelector('body').appendChild(initScript);
+            const blob = new Blob(["<!DOCTYPE html>\n<html lang=\"zh-TW\">\n" + htmlClone.innerHTML + "\n</html>"], { type: 'text/html;charset=utf-8' });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = 'ros_topology_graph.html';
+            document.body.appendChild(a); a.click(); document.body.removeChild(a);
+            showToast('📥 已匯出 HTML 檔案');
+        }
+
+        // ─── 預設資料 ────────────────────────────────────────────────
         const DEFAULT_DATA = `節點	介面類型	方向	Topic / Action / Service 名稱	訊息 / Action / Service 型別	來源節點（訂閱時）	Callback	資料格式	說明	行號
 ◆  Diagnostic									
 Diagnostic	Topic	發布 ↑	/diagnostic_status	String			{"node": "xxx", "status": "OK|WARN|ERROR", "message": "..."}	各節點健康狀態匯總，定時廣播系統診斷資訊	14
@@ -981,85 +1441,60 @@ GlobalPlanner	Topic	發布 ↑	/route_mission	Int32MultiArray			Int32MultiArray�
 GlobalPlanner	Topic	發布 ↑	/route_mission_coords	String			{"3": {"x": 1.25, "y": 4.80, "station_type": "", "exit_strategy": ""}}	路徑節點座標與屬性，供 RE 帶給 LP 計算 spin yaw error	45
 GlobalPlanner	Topic	訂閱 ↓	/request_exit_node	String	TaskAgent	request_exit_node_callback	{"station_id": 4}	TA 在 docking 站出發時觸發，請 GP 用 TF+內積計算後方退出節點	56
 GlobalPlanner	Topic	訂閱 ↓	/request_path	String	TaskAgent	request_path_callback	{"start": 3, "goal": 7}	TA 請求 BFS 算路，帶入起點與終點節點 ID	52
-GlobalPlanner	Topic	訂閱 ↓	/robot_pose_odom	Odometry	RobotPosePublisher	robot_pose_callback	nav_msgs/Odometry（frame_id=map, child_frame_id=L_BASE_FOOTPRINT）	map frame 下的完整 Odometry，格式與 /odom 相同，twist 來自原始 /odom	60
-◆  HeaderFixerCombined									
-HeaderFixerCombined	Topic	發布 ↑	<var:joint_output_topic>	JointState			sensor_msgs/JointState（frame_id 已修正）	修正 header frame_id 後的關節狀態輸出，對應參數 output_topic	35
-HeaderFixerCombined	Topic	發布 ↑	<var:laser_output_topic>	LaserScan			sensor_msgs/LaserScan（frame_id 已修正）	修正 header frame_id 後的 LiDAR 掃描輸出，對應參數 output_topic_2	58
-HeaderFixerCombined	Topic	發布 ↑	<var:odom_output_topic>	Odometry			nav_msgs/Odometry（frame_id 已修正）	修正 header frame_id 後的里程計輸出，對應參數 output_topic_3	84
-HeaderFixerCombined	Topic	訂閱 ↓	<var:joint_input_topic>	JointState	外部 / 未知	joint_callback	sensor_msgs/JointState	原始關節狀態輸入，frame_id 由參數 target_frame_id 指定	36
-HeaderFixerCombined	Topic	訂閱 ↓	<var:laser_input_topic>	LaserScan	外部 / 未知	laser_callback	sensor_msgs/LaserScan	原始 LiDAR 掃描輸入，frame_id 由參數 target_frame_id_2 指定	59
-HeaderFixerCombined	Topic	訂閱 ↓	<var:odom_input_topic>	Odometry	外部 / 未知	odometry_callback	nav_msgs/Odometry	原始里程計輸入，frame_id 由參數 target_frame_id_3 指定	85
-◆  InitialPosePublisher									
-InitialPosePublisher	Topic	發布 ↑	initialpose	PoseWithCovarianceStamped			geometry_msgs/PoseWithCovarianceStamped	啟動時發送初始位置給 AMCL，讓粒子濾波器從正確位置開始收斂	17
+GlobalPlanner	Topic	訂閱 ↓	/robot_pose_odom	Odometry	RobotPosePublisher	robot_pose_callback	nav_msgs/Odometry	map frame 下的完整 Odometry	60
 ◆  LocalPlanner									
-LocalPlanner	Topic	發布 ↑	/base_status	String			"DONE" | "FAIL" | "ALIGN_STRAIGHT" | "ALIGN_SPINNING" | "NAVIGATING" | "ESCAPING"	精細動作執行狀態，TA 根據當前狀態決定下一步（倒車/finetune 完成回報）	90
-LocalPlanner	Topic	發布 ↑	/lp_follow_status	String			"DONE" | "FAIL"	FollowPath 執行結果回報給 RE，RE 據此推進下一路網段或累加 retry	93
-LocalPlanner	Topic	發布 ↑	/lp_state	String			"STATE_IDLE" | "STATE_ROUTE_SPINNING" | "STATE_ROUTE_FOLLOWING" | "STATE_ALIGNING" | "STATE_SPINNING" | "STATE_ESCAPING"	LP 內部詳細狀態，供除錯與監控使用	91
-LocalPlanner	Topic	訂閱 ↓	/local_backup_trigger	String	TaskAgent	local_backup_callback	{"node_id": 3, "x": 1.25, "y": 4.80}	TA 觸發 LP 倒車，含目標節點 ID 與 map frame 座標，LP 查 TF 計算實際距離	145
-LocalPlanner	Topic	訂閱 ↓	/local_finetune	Twist	TaskAgent	finetune_callback	geometry_msgs/Twist（linear.x/y=位移m, angular.z=轉角度）	TA 轉發的微調指令，LP 拆解為 ALIGN_SPINNING / ALIGN_STRAIGHT queue 執行	149
-LocalPlanner	Topic	訂閱 ↓	/planned_route_path	String	RouteExecutor	planned_route_path_callback	{"poses": [{"x":..,"y":..,"z":..,"qx":..,"qy":..,"qz":..,"qw":..},...], "end_x": 4.5, "end_y": 2.1}	RE 發來的路網段 path，LP 先判斷 yaw error 決定是否 Spin，再執行 FollowPath	141
-LocalPlanner	Topic	訂閱 ↓	cmd_stop	Bool	外部 / 未知	cmd_stop_callback	std_msgs/Bool（True）	緊急停止，cancel 所有 Action goal，清空任務佇列，finetune_busy 解鎖	152
-LocalPlanner	Action	Client →	backup	BackUp	Nav2		nav2_msgs/action/BackUp（target.x=距離m, speed=0.1）	逃脫序列：連續失敗 MAX_RETRY 次後後退 0.3m，同時清空 local costmap	103
-LocalPlanner	Action	Client →	dock_robot	DockRobot	Nav2		nav2_msgs/action/DockRobot（dock_id, navigate_to_staging_pose=True）	自動對接 docking 站，use_docking_server=true 時啟用	105
-LocalPlanner	Action	Client →	drive_on_heading	DriveOnHeading	Nav2		nav2_msgs/action/DriveOnHeading（target.x=距離m, speed=±0.25）	直線行駛，負距離=後退；用於倒車退出 docking 站與 finetune 位移	102
-LocalPlanner	Action	Client →	follow_path	FollowPath	Nav2		nav2_msgs/action/FollowPath（path, controller_id='FollowPath'）	沿 RE 提供的 path 執行路網段跟隨，完成後回報 /lp_follow_status	101
-LocalPlanner	Action	Client →	navigate_to_pose	NavigateToPose	Nav2		nav2_msgs/action/NavigateToPose（pose.header.frame_id='map'）	finetune 長距離（>1.2m）時使用，導航至目標 map 座標	104
-LocalPlanner	Action	Client →	spin	Spin	Nav2		nav2_msgs/action/Spin（target_yaw=弧度）	原地旋轉，用於路網段偏航修正與 finetune 轉向	100
-LocalPlanner	Action	Client →	undock_robot	UndockRobot	Nav2		nav2_msgs/action/UndockRobot（dock_type）	從 docking 站脫離，use_docking_server=true 時啟用	106
-LocalPlanner	Service	Client →	/local_costmap/clear_entirely_local_costmap	ClearEntireCostmap	Nav2 / ROS2		nav2_msgs/srv/ClearEntireCostmap	受阻或逃脫序列時清空 local costmap，讓路徑重新計算	111
-◆  MapAnnotator									
-MapAnnotator	Topic	訂閱 ↓	/clicked_point	PointStamped	外部 / 未知	point_callback	geometry_msgs/PointStamped	RViz 點擊地圖事件，用於地圖標注工具互動	13
-MapAnnotator	Topic	訂閱 ↓	/clicked_point	PointStamped	外部 / 未知	point_callback	geometry_msgs/PointStamped	RViz 點擊地圖事件，用於地圖標注工具互動	13
+LocalPlanner	Topic	發布 ↑	/base_status	String			"DONE" | "FAIL" | "ALIGN_STRAIGHT" | "ALIGN_SPINNING" | "NAVIGATING" | "ESCAPING"	精細動作執行狀態	90
+LocalPlanner	Topic	發布 ↑	/lp_follow_status	String			"DONE" | "FAIL"	FollowPath 執行結果回報給 RE	93
+LocalPlanner	Topic	發布 ↑	/lp_state	String			"STATE_IDLE" | "STATE_ROUTE_SPINNING" | "STATE_ROUTE_FOLLOWING"	LP 內部詳細狀態	91
+LocalPlanner	Topic	訂閱 ↓	/local_backup_trigger	String	TaskAgent	local_backup_callback	{"node_id": 3, "x": 1.25, "y": 4.80}	TA 觸發 LP 倒車	145
+LocalPlanner	Topic	訂閱 ↓	/local_finetune	Twist	TaskAgent	finetune_callback	geometry_msgs/Twist	TA 轉發的微調指令	149
+LocalPlanner	Topic	訂閱 ↓	/planned_route_path	String	RouteExecutor	planned_route_path_callback	{"poses": [...]}	RE 發來的路網段 path	141
+LocalPlanner	Topic	訂閱 ↓	cmd_stop	Bool	外部 / 未知	cmd_stop_callback	std_msgs/Bool	緊急停止	152
+LocalPlanner	Action	Client →	backup	BackUp	Nav2		nav2_msgs/action/BackUp	逃脫序列後退	103
+LocalPlanner	Action	Client →	follow_path	FollowPath	Nav2		nav2_msgs/action/FollowPath	路網段跟隨	101
+LocalPlanner	Action	Client →	spin	Spin	Nav2		nav2_msgs/action/Spin	原地旋轉	100
 ◆  MissionBridgeNode									
-MissionBridgeNode	Topic	發布 ↑	/cmd_stop	Bool			std_msgs/Bool（True）	Bridge 發出緊急停止指令，RE 和 LP 收到後 cancel 所有 Action	42
-MissionBridgeNode	Topic	發布 ↑	/finetune_cmd	Twist			geometry_msgs/Twist（linear.x/y=位移m, angular.z=轉角度）	操作員透過 Bridge 下發微調指令，TA 收到後轉發給 LP	41
-MissionBridgeNode	Topic	發布 ↑	/target_station	String			{"target_station": 7}	操作員透過 Bridge 下發目標站點 ID，TA 收到後啟動任務流程	40
-◆  OdometryTFBroadcaster									
-OdometryTFBroadcaster	Topic	訂閱 ↓	<var:odom_topic>	Odometry	外部 / 未知	odom_callback	nav_msgs/Odometry	訂閱里程計資料，廣播 odom→L_BASE_FOOTPRINT TF，frame_id 由參數 odom_topic 指定	23
-◆  RecoveryArbiterNode									
-RecoveryArbiterNode	Topic	發布 ↑	/cmd_vel	Twist			geometry_msgs/Twist（linear.x=縱向速度, angular.z=轉向速度）	仲裁後輸出至底盤的最終速度指令，手動優先於自動	18
-RecoveryArbiterNode	Topic	發布 ↑	/cmd_vel	Twist			geometry_msgs/Twist（linear.x=縱向速度, angular.z=轉向速度）	仲裁後輸出至底盤的最終速度指令，手動優先於自動	18
-RecoveryArbiterNode	Topic	訂閱 ↓	/cmd_vel_auto	Twist	外部 / 未知	auto_callback	geometry_msgs/Twist	Nav2 controller 輸出的自動導航速度指令	12
-RecoveryArbiterNode	Topic	訂閱 ↓	/cmd_vel_auto	Twist	外部 / 未知	auto_callback	geometry_msgs/Twist	Nav2 controller 輸出的自動導航速度指令	12
-RecoveryArbiterNode	Topic	訂閱 ↓	/cmd_vel_manual	Twist	外部 / 未知	manual_callback	geometry_msgs/Twist	操作員手動控制速度指令，優先權高於自動模式	14
-RecoveryArbiterNode	Topic	訂閱 ↓	/cmd_vel_manual	Twist	外部 / 未知	manual_callback	geometry_msgs/Twist	操作員手動控制速度指令，優先權高於自動模式	14
-RecoveryArbiterNode	Topic	訂閱 ↓	/system_status	String	外部 / 未知	diag_callback	"NORMAL" | "EMERGENCY" | "MANUAL"	系統運作模式，決定仲裁器輸出哪個速度來源	15
-RecoveryArbiterNode	Topic	訂閱 ↓	/system_status	String	外部 / 未知	diag_callback	"NORMAL" | "EMERGENCY" | "MANUAL"	系統運作模式，決定仲裁器輸出哪個速度來源	15
+MissionBridgeNode	Topic	發布 ↑	/cmd_stop	Bool			std_msgs/Bool	緊急停止指令	42
+MissionBridgeNode	Topic	發布 ↑	/finetune_cmd	Twist			geometry_msgs/Twist	微調指令	41
+MissionBridgeNode	Topic	發布 ↑	/target_station	String			{"target_station": 7}	目標站點 ID	40
 ◆  RobotPosePublisher									
-RobotPosePublisher	Topic	發布 ↑	/robot_pose_odom	Odometry			nav_msgs/Odometry（frame_id=map, child_frame_id=L_BASE_FOOTPRINT）	map frame 下的完整 Odometry，格式與 /odom 相同，twist 來自原始 /odom	41
-RobotPosePublisher	Topic	訂閱 ↓	/odom	Odometry	外部 / 未知	odom_callback	nav_msgs/Odometry	訂閱原始 odom 取得 twist（線速度 + 角速度），合併至 /robot_pose_odom	56
+RobotPosePublisher	Topic	發布 ↑	/robot_pose_odom	Odometry			nav_msgs/Odometry	map frame 下的 Odometry	41
+RobotPosePublisher	Topic	訂閱 ↓	/odom	Odometry	外部 / 未知	odom_callback	nav_msgs/Odometry	原始 odom	56
 ◆  RouteExecutor									
-RouteExecutor	Topic	發布 ↑	/planned_route_path	String			{"poses": [{"x":..,"y":..,"z":..,"qx":..,"qy":..,"qz":..,"qw":..},...], "end_x": 4.5, "end_y": 2.1}	ComputeAndTrackRoute feedback 取得的 path，加上 end_node 座標後發給 LP 執行	59
-RouteExecutor	Topic	發布 ↑	/route_executor_state	String			"STATE_IDLE" | "STATE_NAVIGATING" | "STATE_WAITING_LP"	RE 內部狀態，供除錯與監控使用	57
-RouteExecutor	Topic	發布 ↑	/route_status	String			"DONE" | "FAIL"	所有路網段完成或達到 MAX_RETRY 失敗上限後回報，TA 據此切換至 IDLE	56
-RouteExecutor	Topic	訂閱 ↓	/lp_follow_status	String	LocalPlanner	lp_follow_status_callback	"DONE" | "FAIL"	監聽 LP 的 FollowPath 執行結果，決定推進下一段或重試	88
-RouteExecutor	Topic	訂閱 ↓	/route_mission	Int32MultiArray	GlobalPlanner	route_mission_callback	Int32MultiArray，節點 ID 序列，如 [3, 5, 6, 7]	GP 直接下達的路網任務，RE 拆分為逐段 [start, end] 執行	80
-RouteExecutor	Topic	訂閱 ↓	/route_mission_coords	String	GlobalPlanner	route_mission_coords_callback	{"3": {"x": 1.25, "y": 4.80, "station_type": "", "exit_strategy": ""}}	GP 發來的節點座標，RE 在發送 /planned_route_path 時帶入 end_node 座標	84
-RouteExecutor	Topic	訂閱 ↓	cmd_stop	Bool	外部 / 未知	cmd_stop_callback	std_msgs/Bool（True）	緊急停止，cancel ComputeAndTrackRoute，清空任務序列，重置 task_index	91
-RouteExecutor	Action	Client →	compute_and_track_route	ComputeAndTrackRoute	Nav2		nav2_msgs/action/ComputeAndTrackRoute（start_id, goal_id）	向 Nav2 請求計算路網段路徑，從 feedback 取得 path 後轉發給 LP，30s timeout 保護	66
+RouteExecutor	Topic	發布 ↑	/planned_route_path	String			{"poses": [...]}	路網段 path 發給 LP	59
+RouteExecutor	Topic	發布 ↑	/route_status	String			"DONE" | "FAIL"	路網導航結果	56
+RouteExecutor	Topic	訂閱 ↓	/lp_follow_status	String	LocalPlanner	lp_follow_status_callback	"DONE" | "FAIL"	LP 執行結果	88
+RouteExecutor	Topic	訂閱 ↓	/route_mission	Int32MultiArray	GlobalPlanner	route_mission_callback	Int32MultiArray	GP 下達路網任務	80
+RouteExecutor	Topic	訂閱 ↓	/route_mission_coords	String	GlobalPlanner	route_mission_coords_callback	{"3": {...}}	節點座標	84
+RouteExecutor	Action	Client →	compute_and_track_route	ComputeAndTrackRoute	Nav2		nav2_msgs/action/ComputeAndTrackRoute	請求路網段路徑	66
 ◆  TaskAgent									
-TaskAgent	Topic	發布 ↑	/local_backup_trigger	String			{"node_id": 3, "x": 1.25, "y": 4.80}	TA 收到退出節點結果後觸發 LP 倒車，帶入節點 ID 與座標	67
-TaskAgent	Topic	發布 ↑	/local_finetune	Twist			geometry_msgs/Twist（linear.x/y=位移m, angular.z=轉角度）	TA 將 /finetune_cmd 直接轉發給 LP，不做任何修改	64
-TaskAgent	Topic	發布 ↑	/navigation_display	String			"IDLE" | "MOVING" | "FAIL"	TA 狀態機對外顯示，供 UI 或監控節點訂閱	70
-TaskAgent	Topic	發布 ↑	/request_exit_node	String			{"station_id": 4}	docking 站出發時請 GP 計算後方退出節點，等待 /exit_node_result 回應	61
-TaskAgent	Topic	發布 ↑	/request_path	String			{"start": 3, "goal": 7}	請 GP 執行 BFS 算路，倒車完成後以 exit_node_id 為起點避免 race condition	58
-TaskAgent	Topic	訂閱 ↓	/base_status	String	LocalPlanner	base_status_callback	"DONE" | "FAIL" | "ALIGN_STRAIGHT" | "ALIGN_SPINNING" | ...	監聽 LP 精細動作狀態，WAITING_BACKUP 時收到 DONE 才觸發算路	93
-TaskAgent	Topic	訂閱 ↓	/current_station	String	GlobalPlanner	current_station_callback	{"id": 4, "station_type": "docking", "exit_strategy": "reverse"}	GP 廣播的當前站點，TA 用來判斷出發類型（docking 需倒車，一般站直接算路）	83
-TaskAgent	Topic	訂閱 ↓	/exit_node_result	String	GlobalPlanner	exit_node_result_callback	{"node_id": 3, "x": 1.25, "y": 4.80}	GP 計算退出節點結果，TA 記住 exit_node_id 作為後續算路起點	89
-TaskAgent	Topic	訂閱 ↓	/finetune_cmd	Twist	MissionBridgeNode	finetune_cmd_callback	geometry_msgs/Twist（linear.x/y=位移m, angular.z=轉角度）	Bridge 下發的微調指令，TA 收到後直接轉發給 LP	80
-TaskAgent	Topic	訂閱 ↓	/planned_path	Int32MultiArray	GlobalPlanner	planned_path_callback	Int32MultiArray，節點 ID 序列，如 [3, 5, 6, 7]	GP 算路完成通知，TA 收到後切換至 EXECUTING 狀態（GP 已直接發任務給 RE）	86
-TaskAgent	Topic	訂閱 ↓	/route_status	String	RouteExecutor	route_status_callback	"DONE" | "FAIL"	RE 路網導航結果，DONE 時 TA 切換至 IDLE，FAIL 時進入錯誤處理	97
-TaskAgent	Topic	訂閱 ↓	/target_station	String	MissionBridgeNode	target_station_callback	{"target_station": 7}	Bridge 下發目標站點，TA 僅在 IDLE 狀態接受，非 IDLE 時忽略	77`;
+TaskAgent	Topic	發布 ↑	/local_backup_trigger	String			{"node_id": 3, "x": 1.25, "y": 4.80}	觸發 LP 倒車	67
+TaskAgent	Topic	發布 ↑	/local_finetune	Twist			geometry_msgs/Twist	轉發微調指令給 LP	64
+TaskAgent	Topic	發布 ↑	/navigation_display	String			"IDLE" | "MOVING" | "FAIL"	TA 狀態對外顯示	70
+TaskAgent	Topic	發布 ↑	/request_exit_node	String			{"station_id": 4}	請 GP 計算退出節點	61
+TaskAgent	Topic	發布 ↑	/request_path	String			{"start": 3, "goal": 7}	請 GP 執行 BFS 算路	58
+TaskAgent	Topic	訂閱 ↓	/base_status	String	LocalPlanner	base_status_callback	"DONE" | "FAIL" | ...	監聽 LP 精細動作狀態	93
+TaskAgent	Topic	訂閱 ↓	/current_station	String	GlobalPlanner	current_station_callback	{"id": 4, ...}	GP 廣播的當前站點	83
+TaskAgent	Topic	訂閱 ↓	/exit_node_result	String	GlobalPlanner	exit_node_result_callback	{"node_id": 3, ...}	GP 計算退出節點結果	89
+TaskAgent	Topic	訂閱 ↓	/finetune_cmd	Twist	MissionBridgeNode	finetune_cmd_callback	geometry_msgs/Twist	Bridge 下發微調指令	80
+TaskAgent	Topic	訂閱 ↓	/planned_path	Int32MultiArray	GlobalPlanner	planned_path_callback	Int32MultiArray	GP 算路完成通知	86
+TaskAgent	Topic	訂閱 ↓	/route_status	String	RouteExecutor	route_status_callback	"DONE" | "FAIL"	RE 路網導航結果	97
+TaskAgent	Topic	訂閱 ↓	/target_station	String	MissionBridgeNode	target_station_callback	{"target_station": 7}	Bridge 下發目標站點	77`;
 
-        // 頁面載入完成後，自動填入預設資料並觸發解析
+        // ─── 初始化入口 ──────────────────────────────────────────────
         document.addEventListener('DOMContentLoaded', () => {
+            document.getElementById('topic-search-input').addEventListener('keypress', e => {
+                if (e.key === 'Enter') searchTopic();
+            });
+            // ESC also closes sidebar
+            document.addEventListener('keydown', e => {
+                if (e.key === 'Escape') closeSidebar();
+            });
+            // 預設資料
             const textarea = document.getElementById('import-textarea');
             if (textarea && textarea.value.trim() === '') {
                 textarea.value = DEFAULT_DATA;
-                // 利用 setTimeout 稍微延遲，確保 Mermaid 等依賴已準備就緒
-                setTimeout(() => {
-                    processImport();
-                }, 100);
+                setTimeout(() => processImport(), 100);
             }
         });
     </script>
